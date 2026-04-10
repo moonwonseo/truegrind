@@ -52,6 +52,103 @@ def _has_any(values: List[str], targets: List[str]) -> bool:
     return any(v in targets for v in values)
 
 
+def _analyze_brew_variables(
+    method_config: Dict[str, Any],
+    water_temp_c: float | None,
+    extraction_time_s: float | None,
+    brew_ratio: float | None,
+    filter_type: str | None,
+) -> Dict[str, Any]:
+    """
+    Check brew variables against the ideal ranges for the brew method.
+    Returns a dict with flags and messages for any out-of-range variables.
+    """
+    issues: List[str] = []
+    analysis: Dict[str, Any] = {"issues": issues, "all_in_range": True}
+
+    if not method_config:
+        return analysis
+
+    # Temperature check
+    if water_temp_c is not None:
+        ideal_temp = method_config.get("ideal_temp_c", [])
+        if len(ideal_temp) == 2:
+            analysis["temp_range"] = ideal_temp
+            if water_temp_c < ideal_temp[0]:
+                issues.append(f"Water temperature ({water_temp_c}°C) is below ideal range ({ideal_temp[0]}–{ideal_temp[1]}°C). Consider raising it.")
+                analysis["temp_status"] = "low"
+            elif water_temp_c > ideal_temp[1]:
+                issues.append(f"Water temperature ({water_temp_c}°C) is above ideal range ({ideal_temp[0]}–{ideal_temp[1]}°C). Consider lowering it.")
+                analysis["temp_status"] = "high"
+            else:
+                analysis["temp_status"] = "ok"
+
+    # Extraction time check
+    if extraction_time_s is not None:
+        ideal_time = method_config.get("ideal_extraction_time_s", [])
+        if len(ideal_time) == 2:
+            analysis["time_range"] = ideal_time
+            if extraction_time_s < ideal_time[0]:
+                issues.append(f"Extraction time ({extraction_time_s}s) is shorter than ideal ({ideal_time[0]}–{ideal_time[1]}s). This may cause under-extraction.")
+                analysis["time_status"] = "short"
+            elif extraction_time_s > ideal_time[1]:
+                issues.append(f"Extraction time ({extraction_time_s}s) is longer than ideal ({ideal_time[0]}–{ideal_time[1]}s). This may cause over-extraction.")
+                analysis["time_status"] = "long"
+            else:
+                analysis["time_status"] = "ok"
+
+    # Brew ratio check
+    if brew_ratio is not None:
+        ideal_ratio = method_config.get("ideal_ratio", [])
+        if len(ideal_ratio) == 2:
+            analysis["ratio_range"] = ideal_ratio
+            analysis["brew_ratio"] = brew_ratio
+            if brew_ratio < ideal_ratio[0]:
+                issues.append(f"Brew ratio (1:{brew_ratio}) is low — coffee may taste strong/heavy. Try 1:{ideal_ratio[0]}–{ideal_ratio[1]}.")
+                analysis["ratio_status"] = "strong"
+            elif brew_ratio > ideal_ratio[1]:
+                issues.append(f"Brew ratio (1:{brew_ratio}) is high — coffee may taste weak/thin. Try 1:{ideal_ratio[0]}–{ideal_ratio[1]}.")
+                analysis["ratio_status"] = "weak"
+            else:
+                analysis["ratio_status"] = "ok"
+
+    # Filter type check
+    if filter_type is not None:
+        ideal_filters = method_config.get("filter_types", [])
+        if ideal_filters and filter_type.lower() not in ideal_filters:
+            issues.append(f"Filter type '{filter_type}' is unusual for this brew method (expected: {', '.join(ideal_filters)}).")
+            analysis["filter_status"] = "unusual"
+        else:
+            analysis["filter_status"] = "ok"
+
+    analysis["all_in_range"] = len(issues) == 0
+    return analysis
+
+
+def classify_grind_message(d50: float, brew_method: str = "pour_over", rules: Dict[str, Any] | None = None) -> str:
+    """
+    Generate an initial classification message based on D50 and brew method.
+    This is shown BEFORE the user provides taste feedback.
+
+    Example: "Your grind (D50=620µm) is well-suited for pour-over brewing."
+    """
+    rules = rules or load_rules()
+    brew_methods = rules.get("brew_methods", {})
+    method_config = brew_methods.get(brew_method, {})
+    target = method_config.get("target_d50_um", 600)
+    description = method_config.get("description", brew_method.replace("_", " "))
+    tolerance = 60  # generous tolerance for initial message
+
+    diff = d50 - target
+
+    if abs(diff) <= tolerance:
+        return f"Your grind (D50={d50:.0f}µm) is well-suited for {description}."
+    elif diff > 0:
+        return f"Your grind (D50={d50:.0f}µm) is coarser than ideal for {description} (target ~{target}µm). You may want to grind finer."
+    else:
+        return f"Your grind (D50={d50:.0f}µm) is finer than ideal for {description} (target ~{target}µm). You may want to grind coarser."
+
+
 def recommend_filter(payload: Dict[str, Any], rules: Dict[str, Any] | None = None) -> Dict[str, Any]:
     """
     Main entry point.
@@ -66,15 +163,17 @@ def recommend_filter(payload: Dict[str, Any], rules: Dict[str, Any] | None = Non
 
     Optional:
       - psd_stats (dict): distribution stats from grind_pipeline.compute_psd().
-        If provided, the engine checks uniformity before recommending grind changes.
         Expected keys: fines_pct, boulders_pct, uniform_pct, bimodal_flag,
                        uniformity ('good'/'moderate'/'poor'), span.
-      - drawdown_time_s
-      - water_temp_c
-      - dose_g
-      - water_g
-      - agitation_level
-      - grinder_model
+      - brew_method (str): 'pour_over', 'french_press', 'aeropress', 'drip', 'moka_pot'
+      - water_temp_c (float): water temperature in celsius
+      - filter_type (str): 'paper' or 'metal'
+      - extraction_time_s (float): total brew/extraction time in seconds
+      - num_pours (int): number of pours (pour-over)
+      - dose_g (float): coffee dose in grams
+      - water_g (float): water weight in grams
+      - agitation_level (str): 'low', 'medium', 'high'
+      - grinder_model (str)
     """
     rules = rules or load_rules()
 
@@ -96,9 +195,25 @@ def recommend_filter(payload: Dict[str, Any], rules: Dict[str, Any] | None = Non
     constants = rules["constants"]
     groups = rules["taste_groups"]
     messages = rules["messages"]
+    brew_methods = rules.get("brew_methods", {})
 
-    target_d50 = float(constants["target_d50_um"])
+    # Look up brew method to get method-specific targets
+    brew_method = payload.get("brew_method", "pour_over")
+    method_config = brew_methods.get(brew_method, {})
+    target_d50 = float(method_config.get("target_d50_um", constants["target_d50_um"]))
     absolute_tolerance = float(constants["absolute_tolerance_um"])
+
+    # Extract optional brew variables
+    water_temp_c = payload.get("water_temp_c")
+    extraction_time_s = payload.get("extraction_time_s")
+    filter_type = payload.get("filter_type")
+    dose_g = payload.get("dose_g")
+    water_g = payload.get("water_g")
+    num_pours = payload.get("num_pours")
+    agitation_level = payload.get("agitation_level")
+
+    # Compute brew ratio if dose and water provided
+    brew_ratio = round(water_g / dose_g, 1) if (dose_g and water_g and dose_g > 0) else None
 
     d50_error_um = current_d50 - target_d50
     tolerance_um = max(absolute_tolerance, abs(fitted_slope) * 0.5)
@@ -128,6 +243,7 @@ def recommend_filter(payload: Dict[str, Any], rules: Dict[str, Any] | None = Non
 
     response: Dict[str, Any] = {
         "mode": "fallback",
+        "brew_method": brew_method,
         "inputs_used": {
             "current_d50": current_d50,
             "current_setting": current_setting,
@@ -135,6 +251,13 @@ def recommend_filter(payload: Dict[str, Any], rules: Dict[str, Any] | None = Non
             "dial_range_min": dial_range_min,
             "dial_range_max": dial_range_max,
             "taste_feedback": taste_feedback,
+            "brew_method": brew_method,
+            "water_temp_c": water_temp_c,
+            "extraction_time_s": extraction_time_s,
+            "filter_type": filter_type,
+            "dose_g": dose_g,
+            "water_g": water_g,
+            "brew_ratio": brew_ratio,
         },
         "derived": {
             "target_d50_um": target_d50,
@@ -156,6 +279,10 @@ def recommend_filter(payload: Dict[str, Any], rules: Dict[str, Any] | None = Non
             "direction": None,
             "message": None,
         },
+        "brew_analysis": _analyze_brew_variables(
+            method_config, water_temp_c, extraction_time_s,
+            brew_ratio, filter_type
+        ),
         "confidence": {
             "grind": "low",
             "secondary": "low",

@@ -1,10 +1,14 @@
 {
-  "schema_version": "1.0",
+  "schema_version": "2.0",
   "layer_name": "true_grind_filter_recommendation",
-  "purpose": "Filter-coffee recommendation rules for grind adjustment first, then one optional non-grind advisory.",
+  "purpose": "Recommendation rules for grind adjustment, considering brew variables, distribution quality, and taste feedback.",
   "scope": {
     "supported_brew_methods": [
-      "filter"
+      "pour_over",
+      "french_press",
+      "aeropress",
+      "drip",
+      "moka_pot"
     ],
     "supported_grinder_types": [
       "stepped"
@@ -23,8 +27,12 @@
       "taste_feedback"
     ],
     "optional": [
-      "drawdown_time_s",
+      "psd_stats",
+      "brew_method",
       "water_temp_c",
+      "filter_type",
+      "extraction_time_s",
+      "num_pours",
       "dose_g",
       "water_g",
       "agitation_level",
@@ -41,13 +49,61 @@
       "contact_time_s": 10
     }
   },
+  "brew_methods": {
+    "pour_over": {
+      "target_d50_um": 600,
+      "ideal_temp_c": [92, 96],
+      "ideal_extraction_time_s": [180, 270],
+      "ideal_ratio": [15, 17],
+      "filter_types": ["paper", "cloth"],
+      "description": "Pour-over (V60, Chemex, Kalita, etc.)"
+    },
+    "french_press": {
+      "target_d50_um": 800,
+      "ideal_temp_c": [93, 96],
+      "ideal_extraction_time_s": [240, 300],
+      "ideal_ratio": [15, 17],
+      "filter_types": ["metal"],
+      "description": "French press / immersion"
+    },
+    "aeropress": {
+      "target_d50_um": 550,
+      "ideal_temp_c": [80, 96],
+      "ideal_extraction_time_s": [60, 180],
+      "ideal_ratio": [12, 17],
+      "filter_types": ["paper", "metal"],
+      "description": "AeroPress (versatile range)"
+    },
+    "drip": {
+      "target_d50_um": 650,
+      "ideal_temp_c": [92, 96],
+      "ideal_extraction_time_s": [240, 360],
+      "ideal_ratio": [15, 18],
+      "filter_types": ["paper"],
+      "description": "Automatic drip machine"
+    },
+    "moka_pot": {
+      "target_d50_um": 450,
+      "ideal_temp_c": [90, 100],
+      "ideal_extraction_time_s": [180, 300],
+      "ideal_ratio": [7, 10],
+      "filter_types": ["metal"],
+      "description": "Moka pot / stovetop"
+    }
+  },
   "taste_groups": {
     "underextracted_signals": [
       "sour",
       "sharp",
       "thin",
       "weak",
-      "hollow"
+      "hollow",
+      "acidic",
+      "tart",
+      "grassy",
+      "vegetal",
+      "underdeveloped",
+      "bright"
     ],
     "overextracted_signals": [
       "bitter",
@@ -55,7 +111,11 @@
       "dry",
       "astringent",
       "muddy",
-      "heavy"
+      "heavy",
+      "burnt",
+      "ashy",
+      "woody",
+      "rubbery"
     ],
     "mixed_signals": [
       "sour_and_bitter",
@@ -64,7 +124,18 @@
     "balanced_signals": [
       "balanced",
       "sweet",
-      "good"
+      "good",
+      "smooth",
+      "clean",
+      "juicy",
+      "complex",
+      "rich",
+      "round",
+      "floral",
+      "fruity",
+      "chocolatey",
+      "nutty",
+      "caramel"
     ]
   },
   "messages": {
