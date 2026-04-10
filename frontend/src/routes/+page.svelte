@@ -27,6 +27,7 @@
   let recommendation = $state<RecResult | null>(null);
 
   let fileInput: HTMLInputElement;
+  let cameraInput: HTMLInputElement;
 
   // ── Health check on mount ─────────────────────────────
 
@@ -36,16 +37,69 @@
 
   // ── Handlers ──────────────────────────────────────────
 
-  function handleFileChange(event: Event) {
-    const file = (event.target as HTMLInputElement).files?.[0];
-    if (file) {
-      uploadedFile = file;
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        uploadedImage = reader.result as string;
-        analyzeGrind();
+  /**
+   * Convert any image (including HEIC/HEIF from iPhone) to JPEG via canvas.
+   * The browser decodes HEIC natively; we re-export as JPEG for OpenCV.
+   */
+  async function convertToJpeg(file: File): Promise<File> {
+    if (file.type === 'image/jpeg' || file.type === 'image/png') {
+      return file;
+    }
+
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      const url = URL.createObjectURL(file);
+
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        canvas.width = img.naturalWidth;
+        canvas.height = img.naturalHeight;
+        const ctx = canvas.getContext('2d')!;
+        ctx.drawImage(img, 0, 0);
+        URL.revokeObjectURL(url);
+
+        canvas.toBlob(
+          (blob) => {
+            if (blob) {
+              const jpegFile = new File(
+                [blob],
+                file.name.replace(/\.[^.]+$/, '.jpg'),
+                { type: 'image/jpeg' }
+              );
+              resolve(jpegFile);
+            } else {
+              reject(new Error('Failed to convert image'));
+            }
+          },
+          'image/jpeg',
+          0.92
+        );
       };
-      reader.readAsDataURL(file);
+
+      img.onerror = () => {
+        URL.revokeObjectURL(url);
+        reject(new Error('Could not load image — format may not be supported'));
+      };
+
+      img.src = url;
+    });
+  }
+
+  async function handleFileChange(event: Event) {
+    const rawFile = (event.target as HTMLInputElement).files?.[0];
+    if (rawFile) {
+      try {
+        const file = await convertToJpeg(rawFile);
+        uploadedFile = file;
+        const reader = new FileReader();
+        reader.onloadend = () => {
+          uploadedImage = reader.result as string;
+          analyzeGrind();
+        };
+        reader.readAsDataURL(file);
+      } catch (err: any) {
+        errorMessage = err.message || 'Could not process image';
+      }
     }
   }
 
@@ -147,19 +201,20 @@
               </div>
               <div>
                 <p class="text-neutral-700 mb-1 font-medium">Upload a photo of your grounds</p>
-                <p class="text-sm text-neutral-500">JPG, PNG up to 10MB</p>
+                <p class="text-sm text-neutral-500">JPG, PNG, HEIC up to 10MB</p>
               </div>
             </div>
           {/if}
         </button>
         <input bind:this={fileInput} type="file" accept="image/*" onchange={handleFileChange} class="hidden" />
+        <input bind:this={cameraInput} type="file" accept="image/*" capture="environment" onchange={handleFileChange} class="hidden" />
 
         {#if !uploadedImage}
           <div class="flex gap-2">
             <button onclick={() => fileInput.click()} class="flex-1 flex items-center justify-center gap-2 bg-amber-700 hover:bg-amber-800 text-white py-2.5 px-4 rounded-xl text-sm font-semibold transition-colors">
               <Upload class="w-4 h-4" /> Choose Photo
             </button>
-            <button onclick={() => fileInput.click()} class="flex-1 flex items-center justify-center gap-2 border border-neutral-300 text-neutral-700 py-2.5 px-4 rounded-xl text-sm font-medium hover:bg-neutral-50 transition-colors">
+            <button onclick={() => cameraInput.click()} class="flex-1 flex items-center justify-center gap-2 border border-neutral-300 text-neutral-700 py-2.5 px-4 rounded-xl text-sm font-medium hover:bg-neutral-50 transition-colors">
               <Camera class="w-4 h-4" /> Take Photo
             </button>
           </div>
