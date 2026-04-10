@@ -1,0 +1,28 @@
+# Environment — never commit credentials
+.env
+
+# Python
+coffeeEnv/
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Datasets — stored in R2, downloaded locally
+ds/
+data/
+raw_datasets/
+
+# YOLO weights and training runs
+*.pt
+runs/
+grind_model/
+
+# macOS
+.DS_Store
+
+# Node
+node_modules/

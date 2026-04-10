@@ -1,0 +1,52 @@
+[project]
+name = "truegrindapp"
+version = "0.1.0"
+description = "Coffee grind size analysis — quarter-calibrated particle segmentation pipeline"
+requires-python = ">=3.13"
+dependencies = [
+    "boto3>=1.42.81",
+    "matplotlib>=3.10.8",
+    "numpy>=2.4.4",
+    "opencv-python-headless>=4.10.0.84",
+    "python-dotenv>=1.2.2",
+    "roboflow>=1.2.16",
+    "scipy>=1.17.1",
+    "tqdm>=4.67.3",
+    "ultralytics>=8.4.33",
+]
+
+[project.optional-dependencies]
+# NVIDIA GPU — installs PyTorch with CUDA 13.0 support
+# Usage: uv sync --extra cuda
+cuda = [
+    "torch>=2.11.0 ; sys_platform != 'darwin'",
+    "torchvision>=0.26.0 ; sys_platform != 'darwin'",
+]
+
+[project.scripts]
+grind   = "grind_pipeline:cli"  # uv run grind train / uv run grind infer
+r2-sync = "r2_sync:main"        # uv run r2-sync upload/download/list
+
+[build-system]
+requires = ["setuptools>=70"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+py-modules = ["grind_pipeline", "r2_sync", "roboflow_prep"]
+packages = ["recommendation"]
+
+[tool.uv]
+package = true
+
+[[tool.uv.index]]
+name = "pytorch-cu130"
+url = "https://download.pytorch.org/whl/cu130"
+explicit = true
+
+[tool.uv.sources]
+torch = [
+  { index = "pytorch-cu130", extra = "cuda", marker = "sys_platform != 'darwin'" },
+]
+torchvision = [
+  { index = "pytorch-cu130", extra = "cuda", marker = "sys_platform != 'darwin'" },
+]

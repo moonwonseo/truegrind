@@ -1,0 +1,76 @@
+{
+  "schema_version": "1.0",
+  "layer_name": "true_grind_filter_recommendation",
+  "purpose": "Filter-coffee recommendation rules for grind adjustment first, then one optional non-grind advisory.",
+  "scope": {
+    "supported_brew_methods": [
+      "filter"
+    ],
+    "supported_grinder_types": [
+      "stepped"
+    ],
+    "unsupported_grinder_types": [
+      "blade"
+    ]
+  },
+  "inputs": {
+    "required": [
+      "current_d50",
+      "current_setting",
+      "fitted_slope",
+      "dial_range_min",
+      "dial_range_max",
+      "taste_feedback"
+    ],
+    "optional": [
+      "drawdown_time_s",
+      "water_temp_c",
+      "dose_g",
+      "water_g",
+      "agitation_level",
+      "grinder_model"
+    ]
+  },
+  "constants": {
+    "target_brew_method": "filter",
+    "target_d50_um": 600,
+    "absolute_tolerance_um": 40,
+    "default_secondary_step": {
+      "temperature_c": 2,
+      "ratio_delta_water_g": 15,
+      "contact_time_s": 10
+    }
+  },
+  "taste_groups": {
+    "underextracted_signals": [
+      "sour",
+      "sharp",
+      "thin",
+      "weak",
+      "hollow"
+    ],
+    "overextracted_signals": [
+      "bitter",
+      "harsh",
+      "dry",
+      "astringent",
+      "muddy",
+      "heavy"
+    ],
+    "mixed_signals": [
+      "sour_and_bitter",
+      "both"
+    ],
+    "balanced_signals": [
+      "balanced",
+      "sweet",
+      "good"
+    ]
+  },
+  "messages": {
+    "balanced": "Your brew seems balanced. Keep this setting as your reference point.",
+    "mixed": "This sounds like uneven extraction more than a simple grind-size issue.",
+    "mixed_secondary": "Keep grind the same for one more brew. Reduce or standardize agitation, pour more evenly, and watch for stalled drawdown.",
+    "fallback": "Not enough signal for a confident recommendation yet. Rebrew with the same recipe, re-photograph, and add taste notes plus drawdown time."
+  }
+}
