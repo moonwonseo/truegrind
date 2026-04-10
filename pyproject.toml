@@ -5,14 +5,17 @@ description = "Coffee grind size analysis — quarter-calibrated particle segmen
 requires-python = ">=3.13"
 dependencies = [
     "boto3>=1.42.81",
+    "fastapi>=0.115.0",
     "matplotlib>=3.10.8",
     "numpy>=2.4.4",
     "opencv-python-headless>=4.10.0.84",
     "python-dotenv>=1.2.2",
+    "python-multipart>=0.0.9",
     "roboflow>=1.2.16",
     "scipy>=1.17.1",
     "tqdm>=4.67.3",
     "ultralytics>=8.4.33",
+    "uvicorn>=0.30.0",
 ]
 
 [project.optional-dependencies]
