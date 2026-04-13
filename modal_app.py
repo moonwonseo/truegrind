@@ -14,7 +14,7 @@ import modal
 # ── Image: install all dependencies (CPU-only torch to keep size down) ──
 image = (
     modal.Image.debian_slim(python_version="3.11")
-    .apt_install("libgl1", "libglib2.0-0")
+    .apt_install("libgl1", "libglib2.0-0", "libheif-dev")
     .pip_install(
         "torch==2.1.0",
         "torchvision==0.16.0",
