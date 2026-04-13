@@ -59,7 +59,7 @@ MODEL_DIR = "/model-cache"
     memory=4096,
     gpu="T4",  # cheapest Modal GPU, plenty for inference
     timeout=120,
-    scaledown_window=300,
+    scaledown_window=1200,
 )
 @modal.asgi_app()
 def fastapi_app():
