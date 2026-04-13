@@ -1,0 +1,8 @@
+[phases.setup]
+nixPkgs = ["python311"]
+
+[phases.install]
+cmds = [
+  "pip install --extra-index-url https://download.pytorch.org/whl/cpu torch==2.1.0+cpu torchvision==0.16.0+cpu",
+  "pip install ultralytics opencv-python-headless numpy scipy boto3 python-dotenv fastapi uvicorn pydantic requests tqdm"
+]
