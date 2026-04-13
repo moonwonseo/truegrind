@@ -211,23 +211,37 @@ async def analyze_photo(
     filename = (file.filename or "").lower()
     image = None
 
-    # Try HEIC/HEIF first if filename suggests it
-    if filename.endswith(('.heic', '.heif')):
+    # Try standard cv2 decode first (JPEG, PNG, WebP, etc.)
+    np_arr = np.frombuffer(contents, np.uint8)
+    image = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
+
+    # If cv2 failed, try pillow-heif (handles HEIC/HEIF regardless of extension)
+    if image is None:
         try:
             import pillow_heif
             pillow_heif.register_heif_opener()
             pil_img = Image.open(io.BytesIO(contents))
             pil_img = pil_img.convert('RGB')
             image = cv2.cvtColor(np.array(pil_img), cv2.COLOR_RGB2BGR)
-            print(f"[Decode] HEIC decoded via pillow-heif: {image.shape[1]}x{image.shape[0]}")
+            print(f"[Decode] Decoded via pillow-heif: {image.shape[1]}x{image.shape[0]}")
         except Exception as e:
-            print(f"[Decode] HEIC decode failed ({e}), falling back to cv2")
+            print(f"[Decode] pillow-heif also failed: {e}")
             image = None
 
-    # Fallback: standard cv2 decode (JPEG, PNG, etc.)
-    if image is None:
-        np_arr = np.frombuffer(contents, np.uint8)
-        image = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
+    # If filename says HEIC but cv2 succeeded, still try pillow-heif for higher quality
+    if image is not None and filename.endswith(('.heic', '.heif')):
+        try:
+            import pillow_heif
+            pillow_heif.register_heif_opener()
+            pil_img = Image.open(io.BytesIO(contents))
+            pil_img = pil_img.convert('RGB')
+            heif_image = cv2.cvtColor(np.array(pil_img), cv2.COLOR_RGB2BGR)
+            # Use HEIF decode if it produced a higher-res image
+            if heif_image.shape[0] * heif_image.shape[1] >= image.shape[0] * image.shape[1]:
+                image = heif_image
+                print(f"[Decode] Using pillow-heif (higher res): {image.shape[1]}x{image.shape[0]}")
+        except Exception:
+            pass  # keep cv2 version
 
     if image is None:
         raise HTTPException(status_code=400, detail="Could not decode image. Send JPG, PNG, or HEIC.")
