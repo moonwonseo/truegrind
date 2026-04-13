@@ -35,7 +35,7 @@ image = (
         "Pillow",
         "pillow-heif",
     )
-    .add_local_dir(".", remote_path="/root", ignore=[".venv", "__pycache__", ".git", "runs", "data", "ds", "models"])
+    .add_local_dir(".", remote_path="/root", ignore=[".venv", "__pycache__", ".git", "runs", "data", "ds", "models", ".DS_Store", "frontend", "node_modules", "*.md"])
 )
 
 # ── App ──────────────────────────────────────────────────────────────────
