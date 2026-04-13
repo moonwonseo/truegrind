@@ -280,11 +280,13 @@ async def analyze_photo(
         # Check quarter aspect ratio for camera angle
         ANGLE_THRESHOLD = 0.92
         if quarter_aspect_ratio is not None and quarter_aspect_ratio < ANGLE_THRESHOLD:
+            import math
+            correction_pct = (1.0 / math.sqrt(quarter_aspect_ratio) - 1) * 100
             early_warnings.append({
                 "code": "camera_angle",
-                "severity": "error",
-                "message": f"Camera angle too steep — quarter appears elliptical ({quarter_aspect_ratio:.2f})",
-                "tip": "Hold your phone directly overhead (bird's-eye view). The quarter should look like a perfect circle, not an oval.",
+                "severity": "warning",
+                "message": f"Camera tilted — quarter elliptical ({quarter_aspect_ratio:.2f}). Corrected +{correction_pct:.0f}%.",
+                "tip": "Results have been mathematically adjusted, but a flat overhead photo gives the most reliable measurements.",
             })
 
 
@@ -333,6 +335,16 @@ async def analyze_photo(
 
         # Step 3: Convert to microns (grounds only — silverskin excluded)
         diameters_um = compute_diameters_um(grounds, px_per_mm)
+
+        # Step 3b: Tilt correction — camera angle causes projected area to shrink
+        # by cos(θ), making equivalent diameters shrink by √cos(θ).
+        # aspect_ratio = cos(θ), so correction = 1 / √(aspect_ratio)
+        import math
+        if quarter_aspect_ratio is not None and quarter_aspect_ratio < 0.99:
+            tilt_correction = 1.0 / math.sqrt(quarter_aspect_ratio)
+            diameters_um = [d * tilt_correction for d in diameters_um]
+            print(f"[Tilt] aspect_ratio={quarter_aspect_ratio:.3f} → correction={tilt_correction:.3f} "
+                  f"(+{(tilt_correction - 1) * 100:.1f}%)")
 
         # DEBUG: Show diameter stats
         diameters_px = [p["diameter_px"] for p in grounds]

@@ -134,8 +134,9 @@ def detect_quarter(image_bgr: np.ndarray, debug: bool = False) -> float | None:
             minor_axis = min(ellipse[1])
             if major_axis > 0:
                 aspect_ratio = minor_axis / major_axis
-                # Use the minor axis for calibration — it's less affected by tilt
-                effective_diameter_px = minor_axis
+                # Use MAJOR axis for calibration — it's the uncompressed dimension
+                # (the true diameter, unaffected by camera tilt)
+                effective_diameter_px = major_axis
                 print(f"[Quarter] Ellipse: major={major_axis:.1f}px, minor={minor_axis:.1f}px, "
                       f"aspect_ratio={aspect_ratio:.3f}")
     
