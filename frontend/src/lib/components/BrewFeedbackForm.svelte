@@ -6,19 +6,27 @@
   let {
     d50,
     onSubmit,
+    initialBrewMethod = 'pour_over',
+    initialTemp = '',
+    initialDose = '',
+    initialWater = '',
   }: {
     d50: number;
     onSubmit: (data: any) => void;
+    initialBrewMethod?: string;
+    initialTemp?: string;
+    initialDose?: string;
+    initialWater?: string;
   } = $props();
 
   let grindSetting = $state(5);
-  let brewMethod = $state('pour_over');
-  let waterTemp = $state('');
+  let brewMethod = $state(initialBrewMethod);
+  let waterTemp = $state(initialTemp);
   let extractionMin = $state('');
   let extractionSec = $state('');
   let filterType = $state('paper');
-  let doseG = $state('');
-  let waterG = $state('');
+  let doseG = $state(initialDose);
+  let waterG = $state(initialWater);
   let numPours = $state('');
   let tasteNotes = $state('');
   let selectedTags = $state<string[]>([]);
@@ -44,12 +52,24 @@
     { label: 'Smooth', value: 'smooth', group: 'good' },
   ];
 
-  const BREW_METHODS = [
-    { value: 'pour_over', label: 'Pour Over' },
-    { value: 'french_press', label: 'French Press' },
-    { value: 'aeropress', label: 'AeroPress' },
-    { value: 'drip', label: 'Drip Machine' },
-    { value: 'moka_pot', label: 'Moka Pot' },
+  const BREW_METHOD_GROUPS = [
+    { label: 'Pour Over', items: [
+      { value: 'pour_over', label: 'V60' },
+      { value: 'chemex', label: 'Chemex' },
+      { value: 'pour_over', label: 'Kalita Wave' },
+      { value: 'pour_over', label: 'Hario Switch' },
+      { value: 'pour_over', label: 'Pour Over (Other)' },
+    ]},
+    { label: 'Immersion', items: [
+      { value: 'french_press', label: 'French Press' },
+      { value: 'aeropress', label: 'AeroPress' },
+      { value: 'aeropress', label: 'AeroPress (Inverted)' },
+      { value: 'cold_brew', label: 'Cold Brew' },
+    ]},
+    { label: 'Pressure', items: [
+      { value: 'espresso', label: 'Espresso' },
+      { value: 'moka_pot', label: 'Moka Pot' },
+    ]},
   ];
 
   function toggleTag(tag: string) {
@@ -111,8 +131,12 @@
       </label>
       <select id="brewMethod" bind:value={brewMethod}
         class="w-full border border-neutral-200 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500 bg-white">
-        {#each BREW_METHODS as method}
-          <option value={method.value}>{method.label}</option>
+        {#each BREW_METHOD_GROUPS as group}
+          <optgroup label={group.label}>
+            {#each group.items as method}
+              <option value={method.value}>{method.label}</option>
+            {/each}
+          </optgroup>
         {/each}
       </select>
     </div>

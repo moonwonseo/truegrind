@@ -20,16 +20,21 @@ from pathlib import Path
 import torch
 
 
+_cached_device = None
+
 def get_device() -> str:
-    """Pick the best available device: CUDA > MPS > CPU."""
+    """Pick the best available device: CUDA > MPS > CPU. Cached after first call."""
+    global _cached_device
+    if _cached_device is not None:
+        return _cached_device
     if torch.cuda.is_available():
-        device = "cuda"
+        _cached_device = "cuda"
     elif torch.backends.mps.is_available():
-        device = "mps"
+        _cached_device = "mps"
     else:
-        device = "cpu"
-    print(f"[Device] Using {device.upper()}")
-    return device
+        _cached_device = "cpu"
+    print(f"[Device] Using {_cached_device.upper()}")
+    return _cached_device
 
 
 # ─────────────────────────────────────────────────────────────
@@ -85,7 +90,7 @@ def detect_quarter(image_bgr: np.ndarray, debug: bool = False) -> float | None:
 
     if circles is None:
         print("[WARNING] No quarter detected. Check image or adjust Hough params.")
-        return None
+        return None, None
 
     circles = np.round(circles[0, :]).astype(int)
 
@@ -108,7 +113,7 @@ def detect_quarter(image_bgr: np.ndarray, debug: bool = False) -> float | None:
 
     if best_circle is None:
         print("[WARNING] Circles found but none matched quarter brightness profile.")
-        return None
+        return None, None
 
     cx, cy, r = best_circle
     diameter_px = r * 2
@@ -127,12 +132,102 @@ def detect_quarter(image_bgr: np.ndarray, debug: bool = False) -> float | None:
         cv2.waitKey(0)
         cv2.destroyAllWindows()
 
-    return px_per_mm
+    return px_per_mm, (cx, cy, r)
+
+
+def crop_around_quarter(
+    image_bgr: np.ndarray,
+    padding_factor: float = 4.0,
+) -> np.ndarray:
+    """
+    Crop a square region around the detected quarter.
+
+    The crop extends padding_factor × quarter_radius from the quarter center
+    in each direction. This ensures YOLO gets a zoomed-in view where
+    individual particles are much larger in the 640×640 internal resolution.
+
+    Args:
+        image_bgr:      input image
+        padding_factor: how many quarter-radii to extend from center (default 4.0)
+
+    Returns:
+        Cropped image. If quarter not found, returns original image.
+    """
+    gray = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2GRAY)
+    blurred = cv2.GaussianBlur(gray, (9, 9), 2)
+
+    h, w = gray.shape
+    min_r = int(w * 0.04)
+    max_r = int(w * 0.18)
+
+    circles = cv2.HoughCircles(
+        blurred, cv2.HOUGH_GRADIENT, dp=1.2,
+        minDist=w // 4, param1=60, param2=35,
+        minRadius=min_r, maxRadius=max_r,
+    )
+
+    if circles is None:
+        return image_bgr
+
+    circles = np.round(circles[0, :]).astype(int)
+
+    # Find the best quarter (same logic as detect_quarter)
+    best_circle = None
+    best_score = -1
+    for (cx, cy, r) in circles:
+        mask = np.zeros_like(gray)
+        cv2.circle(mask, (cx, cy), r, 255, -1)
+        mean_val = cv2.mean(gray, mask=mask)[0]
+        if 140 < mean_val < 235:
+            score = 1.0 - abs(mean_val - 190) / 50
+            if score > best_score:
+                best_score = score
+                best_circle = (cx, cy, r)
+
+    if best_circle is None:
+        return image_bgr
+
+    cx, cy, r = best_circle
+    extent = int(r * padding_factor)
+
+    # Compute crop bounds, clamped to image dimensions
+    x1 = max(0, cx - extent)
+    y1 = max(0, cy - extent)
+    x2 = min(w, cx + extent)
+    y2 = min(h, cy + extent)
+
+    # Make it square (use the smaller dimension)
+    crop_w = x2 - x1
+    crop_h = y2 - y1
+    side = min(crop_w, crop_h)
+
+    # Re-center the square crop
+    center_x = (x1 + x2) // 2
+    center_y = (y1 + y2) // 2
+    half = side // 2
+    x1 = max(0, center_x - half)
+    y1 = max(0, center_y - half)
+    x2 = min(w, x1 + side)
+    y2 = min(h, y1 + side)
+
+    cropped = image_bgr[y1:y2, x1:x2]
+    return cropped
 
 
 # ─────────────────────────────────────────────────────────────
 # STEP 2: PARTICLE SEGMENTATION
 # ─────────────────────────────────────────────────────────────
+
+# Class names from the fine-tuned model (Roboflow export order)
+CLASS_NAMES = {0: "clump", 1: "coffee-grounds-dataset", 2: "silverskin"}
+CLASS_GROUND = 1      # the measurable coffee grounds
+CLASS_SILVERSKIN = 2   # chaff — excluded from PSD
+CLASS_CLUMP = 0        # clumped grounds — flagged
+
+# Clump thresholds
+CLUMP_WARN_RATIO = 0.05    # >5% clump area → mild warning
+CLUMP_RETAKE_RATIO = 0.15  # >15% clump area → retake photo
+
 
 def segment_particles(
     image_bgr: np.ndarray,
@@ -146,8 +241,10 @@ def segment_particles(
         - area_px: area in pixels
         - diameter_px: equivalent circular diameter in pixels
         - bbox: (x1, y1, x2, y2)
+        - class_id: int (0=clump, 1=coffee-grounds-dataset, 2=silverskin)
+        - class_name: str
     """
-    results = model.predict(image_bgr, conf=conf_threshold, verbose=False, device=get_device())
+    results = model.predict(image_bgr, conf=conf_threshold, verbose=False, device=get_device(), imgsz=1920)
     particles = []
 
     if results[0].masks is None:
@@ -156,68 +253,186 @@ def segment_particles(
 
     masks = results[0].masks.data.cpu().numpy()   # (N, H, W)
     boxes = results[0].boxes.xyxy.cpu().numpy()   # (N, 4)
+    classes = results[0].boxes.cls.cpu().numpy().astype(int)  # (N,)
 
-    for i, (mask, box) in enumerate(zip(masks, boxes)):
+    for i, (mask, box, cls_id) in enumerate(zip(masks, boxes, classes)):
         # Resize mask to match original image size
         mask_resized = cv2.resize(
             mask, (image_bgr.shape[1], image_bgr.shape[0]),
             interpolation=cv2.INTER_NEAREST
         ).astype(np.uint8)
 
+        # Erode mask by 2px to remove boundary bloat from YOLO upscaling
+        erode_kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+        mask_resized = cv2.erode(mask_resized, erode_kernel, iterations=1)
+
         area_px = int(mask_resized.sum())
-        if area_px < 10:   # skip noise
+        if area_px < 10:
             continue
 
-        # Equivalent circular diameter: d = 2 * sqrt(A / pi)
-        diameter_px = 2 * np.sqrt(area_px / np.pi)
+        # ── Extract individual particles via distance transform local maxima ──
+        # Each local maximum in the distance transform corresponds to the center
+        # of one particle, with value ≈ that particle's radius.
+        dist = cv2.distanceTransform(mask_resized, cv2.DIST_L2, 5)
 
-        particles.append({
-            "mask": mask_resized,
-            "area_px": area_px,
-            "diameter_px": diameter_px,
-            "bbox": box.astype(int).tolist(),
-        })
+        # Find local maxima: dilate the distance map, then maxima are where
+        # the original equals the dilated version.
+        kernel_size = max(3, int(dist.max() * 0.5) | 1)  # odd kernel ~half the max radius
+        dilated = cv2.dilate(dist, np.ones((kernel_size, kernel_size)))
+        local_max_mask = ((dist == dilated) & (dist > 2)).astype(np.uint8)
 
-    print(f"[Segmentation] {len(particles)} particles detected.")
+        # Label connected components of the local max mask
+        n_maxima, labels_max = cv2.connectedComponents(local_max_mask)
+
+        if n_maxima <= 1:
+            # No valid maxima — use minor axis as fallback
+            contours, _ = cv2.findContours(mask_resized, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            if not contours:
+                continue
+            cnt = max(contours, key=cv2.contourArea)
+            if len(cnt) >= 5:
+                _, (w_ell, h_ell), _ = cv2.fitEllipse(cnt)
+                diameter_px = min(w_ell, h_ell)
+            else:
+                rect = cv2.minAreaRect(cnt)
+                diameter_px = min(rect[1])
+            if diameter_px < 2:
+                continue
+            particles.append({
+                "mask": mask_resized,
+                "area_px": area_px,
+                "diameter_px": diameter_px,
+                "bbox": box.astype(int).tolist(),
+                "class_id": int(cls_id),
+                "class_name": CLASS_NAMES.get(int(cls_id), "unknown"),
+            })
+        else:
+            # Multiple particles detected within this mask
+            for label_id in range(1, n_maxima):
+                # Get the max distance value for this local maximum
+                component_vals = dist[labels_max == label_id]
+                if len(component_vals) == 0:
+                    continue
+                radius_px = component_vals.max()
+                if radius_px < 1:
+                    continue
+                diameter_px = 2.0 * radius_px
+
+                # Use the local max centroid for the bbox
+                ys, xs = np.where(labels_max == label_id)
+                cx, cy = int(xs.mean()), int(ys.mean())
+                r_int = int(radius_px)
+                sub_bbox = [cx - r_int, cy - r_int, cx + r_int, cy + r_int]
+
+                particles.append({
+                    "mask": mask_resized,  # shared mask (for visualization)
+                    "area_px": int(np.pi * radius_px**2),  # estimated individual area
+                    "diameter_px": diameter_px,
+                    "bbox": sub_bbox,
+                    "class_id": int(cls_id),
+                    "class_name": CLASS_NAMES.get(int(cls_id), "unknown"),
+                })
+
+    # Summarise detections by class
+    counts = {}
+    for p in particles:
+        name = p["class_name"]
+        counts[name] = counts.get(name, 0) + 1
+    summary = ", ".join(f"{v} {k}" for k, v in counts.items())
+    print(f"[Segmentation] {len(particles)} detections: {summary}")
 
     if debug and particles:
+        # Colour code: green=ground, red=silverskin, yellow=clump
+        CLASS_COLORS = {CLASS_GROUND: (0, 200, 0), CLASS_SILVERSKIN: (0, 0, 200), CLASS_CLUMP: (0, 200, 200)}
         vis = image_bgr.copy()
         for p in particles:
-            color = tuple(np.random.randint(100, 255, 3).tolist())
+            color = CLASS_COLORS.get(p["class_id"], (200, 200, 200))
             vis[p["mask"] == 1] = (
                 vis[p["mask"] == 1] * 0.5 + np.array(color) * 0.5
             ).astype(np.uint8)
-        cv2.imshow("Particle Segmentation", vis)
+        cv2.imshow("Particle Segmentation (green=ground, red=silverskin, yellow=clump)", vis)
         cv2.waitKey(0)
         cv2.destroyAllWindows()
 
     return particles
 
 
+def classify_detections(particles: list[dict]) -> dict:
+    """
+    Separate detections into grounds, silverskin, and clumps.
+    Compute clump ratio and generate warnings.
+
+    Returns dict with:
+        - grounds: list of particle dicts (class_id == 1)
+        - silverskin: list of particle dicts (class_id == 2)
+        - clumps: list of particle dicts (class_id == 0)
+        - clump_ratio: float (clump area / total ground+clump area)
+        - clump_warning: str | None
+        - n_silverskin: int
+    """
+    grounds = [p for p in particles if p["class_id"] == CLASS_GROUND]
+    silverskin = [p for p in particles if p["class_id"] == CLASS_SILVERSKIN]
+    clumps = [p for p in particles if p["class_id"] == CLASS_CLUMP]
+
+    # Compute clump ratio by area
+    total_ground_area = sum(p["area_px"] for p in grounds)
+    total_clump_area = sum(p["area_px"] for p in clumps)
+    total_area = total_ground_area + total_clump_area
+    clump_ratio = total_clump_area / total_area if total_area > 0 else 0.0
+
+    # Generate clump warning
+    clump_warning = None
+    if clump_ratio > CLUMP_RETAKE_RATIO:
+        clump_warning = (
+            f"Too many clumps detected ({clump_ratio:.0%} of area). "
+            f"Spread the grounds more thinly on the paper and retake the photo."
+        )
+    elif clump_ratio > CLUMP_WARN_RATIO:
+        clump_warning = (
+            f"Some clumps detected ({clump_ratio:.0%} of area). "
+            f"Results may be less accurate."
+        )
+
+    print(f"[Classification] {len(grounds)} grounds, {len(silverskin)} silverskin, {len(clumps)} clumps")
+    if clump_warning:
+        print(f"[Classification] ⚠️  {clump_warning}")
+    if silverskin:
+        print(f"[Classification] ℹ️  {len(silverskin)} silverskin pieces excluded from PSD.")
+
+    return {
+        "grounds": grounds,
+        "silverskin": silverskin,
+        "clumps": clumps,
+        "clump_ratio": clump_ratio,
+        "clump_warning": clump_warning,
+        "n_silverskin": len(silverskin),
+    }
+
+
 def split_clusters(
     particles: list[dict],
     px_per_mm: float,
-    max_particle_mm: float = 2.0,
+    max_particle_mm: float = 1.2,
 ) -> list[dict]:
     """
     Post-process detected particles: split large clusters into individual
     grounds using watershed segmentation.
 
-    The YOLOv8 model (trained on seeds/grains) often detects clumps of
-    coffee grounds as a single particle. This function identifies oversized
-    detections and uses distance-transform + watershed to split them.
+    The YOLOv8 model often detects clumps of coffee grounds as a single
+    particle. This function identifies oversized detections (>1.2mm) and
+    uses distance-transform + watershed to split them.
 
     Args:
-        particles:       list of particle dicts from segment_particles()
-        px_per_mm:       scale from quarter detection
-        max_particle_mm: particles with equiv. diameter above this are
-                         candidates for splitting (default 2.0mm = 2000µm)
+        particles:           list of particle dicts from segment_particles()
+        px_per_mm:           scale from quarter detection
+        max_particle_mm:     particles with equiv. diameter above this are
+                             candidates for splitting (default 1.2mm = 1200µm)
     Returns:
         Updated particle list with clusters split into sub-particles.
     """
     max_area_px = np.pi * (max_particle_mm * px_per_mm / 2) ** 2
-    # Minimum area: skip sub-regions smaller than ~50µm diameter
-    min_diameter_mm = 0.05  # 50µm
+    # Minimum area: skip sub-regions smaller than ~100µm diameter
+    min_diameter_mm = 0.1  # 100µm
     min_area_px = np.pi * (min_diameter_mm * px_per_mm / 2) ** 2
 
     out = []
@@ -236,33 +451,32 @@ def split_clusters(
         # Distance transform: peaks = particle centers
         dist = cv2.distanceTransform(mask, cv2.DIST_L2, 5)
 
-        # Threshold to find sure foreground (particle cores)
-        _, sure_fg = cv2.threshold(dist, 0.35 * dist.max(), 255, 0)
+        # Use a lower threshold to find more individual cores
+        _, sure_fg = cv2.threshold(dist, 0.25 * dist.max(), 255, 0)
         sure_fg = sure_fg.astype(np.uint8)
+
+        # Morphological opening to clean up noise in sure_fg
+        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
+        sure_fg = cv2.morphologyEx(sure_fg, cv2.MORPH_OPEN, kernel)
 
         # Find individual cores via connected components
         n_labels, labels = cv2.connectedComponents(sure_fg)
 
         if n_labels <= 2:
-            # Only one core found — can't split, keep original
+            # Only one core found — can't split, keep original particle
             out.append(p)
             continue
 
-        # Watershed needs markers: background=0, unknown=-1 (in OpenCV: 0)
-        # We'll use the connected components as markers
+        # Multiple cores found — use watershed to split
         markers = labels.copy().astype(np.int32)
-        # Mark unknown regions (part of mask but not sure foreground)
         markers[mask == 1] = np.where(
             markers[mask == 1] > 0, markers[mask == 1], 0
         )
-        # Background = 1 (watershed convention)
         markers[mask == 0] = 1
 
-        # Watershed needs a 3-channel image
         mask_3ch = cv2.cvtColor(mask * 255, cv2.COLOR_GRAY2BGR)
         cv2.watershed(mask_3ch, markers)
 
-        # Extract each sub-particle (labels 2..n_labels)
         for label_id in range(2, n_labels + 1):
             sub_mask = (markers == label_id).astype(np.uint8)
             sub_area = int(sub_mask.sum())
@@ -272,7 +486,6 @@ def split_clusters(
 
             sub_diameter = 2 * np.sqrt(sub_area / np.pi)
 
-            # Compute bounding box of this sub-mask
             ys, xs = np.where(sub_mask)
             if len(xs) == 0:
                 continue
@@ -283,12 +496,14 @@ def split_clusters(
                 "area_px": sub_area,
                 "diameter_px": sub_diameter,
                 "bbox": bbox,
+                "class_id": p.get("class_id", 1),
+                "class_name": p.get("class_name", "coffee-grounds-dataset"),
             })
 
         n_split += 1
 
     if n_split > 0:
-        print(f"[Cluster Split] Split {n_split} oversized regions → {len(out)} total particles (was {len(particles)})")
+        print(f"[Cluster Split] Watershed-split {n_split} oversized regions → {len(out)} total particles (was {len(particles)})")
     else:
         print(f"[Cluster Split] No oversized regions found, {len(out)} particles retained.")
 
@@ -457,7 +672,7 @@ def classify_grind(d50_um: float) -> str:
 
 def run_pipeline(
     image_path: str,
-    model_path: str = "yolov8n-seg.pt",   # swap for your fine-tuned weights
+    model_path: str = "best.pt",   # fine-tuned 3-class model
     conf: float = 0.25,
     debug: bool = False,
     save_plot: str | None = None,
@@ -465,16 +680,20 @@ def run_pipeline(
     """
     Full pipeline: image → PSD + grind classification.
 
+    Uses the 3-class model:
+      - coffee-grounds-dataset → measured for PSD
+      - silverskin → excluded (chaff, not extractable)
+      - clump → flagged with warnings
+
     Args:
         image_path:  Path to input image (JPG/PNG).
-        model_path:  YOLOv8-Seg weights. Use pretrained for testing,
-                     fine-tuned weights for production.
+        model_path:  YOLOv8-Seg weights (default: best.pt, the fine-tuned model).
         conf:        Detection confidence threshold.
         debug:       Show intermediate visualizations.
         save_plot:   If set, saves PSD plot to this path.
 
     Returns:
-        dict with psd stats + grind category.
+        dict with psd stats + grind category + class breakdown.
     """
     # Load image
     image = cv2.imread(image_path)
@@ -487,21 +706,34 @@ def run_pipeline(
     print(f"{'='*50}")
 
     # Step 1: Quarter detection
-    px_per_mm = detect_quarter(image, debug=debug)
+    px_per_mm, _ = detect_quarter(image, debug=debug)
     if px_per_mm is None:
         raise RuntimeError(
             "Quarter not detected. Ensure a US quarter is visible on white paper."
         )
 
-    # Step 2: Particle segmentation
+    # Step 2: Particle segmentation (all classes)
     model = YOLO(model_path)
     model.to(get_device())
-    particles = segment_particles(image, model, conf_threshold=conf, debug=debug)
-    if not particles:
+    all_detections = segment_particles(image, model, conf_threshold=conf, debug=debug)
+    if not all_detections:
         raise RuntimeError("No particles detected. Check model or image quality.")
 
-    # Step 3: Convert to microns
-    diameters_um = compute_diameters_um(particles, px_per_mm)
+    # Step 2b: Classify into grounds / silverskin / clumps
+    detection_info = classify_detections(all_detections)
+    grounds = detection_info["grounds"]
+
+    if not grounds:
+        raise RuntimeError(
+            "No individual coffee grounds detected — only clumps/silverskin found. "
+            "Try spreading the grounds more thinly."
+        )
+
+    # Step 2c: Split oversized ground detections (watershed)
+    grounds = split_clusters(grounds, px_per_mm)
+
+    # Step 3: Convert to microns (grounds only — silverskin excluded)
+    diameters_um = compute_diameters_um(grounds, px_per_mm)
 
     # Step 4: PSD
     psd = compute_psd(diameters_um)
@@ -511,9 +743,17 @@ def run_pipeline(
     psd["grind_category"] = grind_category
     psd["px_per_mm"] = px_per_mm
 
+    # Add class breakdown info
+    psd["n_silverskin"] = detection_info["n_silverskin"]
+    psd["n_clumps"] = len(detection_info["clumps"])
+    psd["clump_ratio"] = detection_info["clump_ratio"]
+    psd["clump_warning"] = detection_info["clump_warning"]
+
     # Report
     print(f"\n{'─'*40}")
-    print(f"  Particles detected : {psd['n_particles']}")
+    print(f"  Grounds measured   : {psd['n_particles']}")
+    print(f"  Silverskin (excl.) : {psd['n_silverskin']}")
+    print(f"  Clumps (flagged)   : {psd['n_clumps']}")
     print(f"  Scale              : {px_per_mm:.2f} px/mm")
     print(f"  D10                : {psd['D10']:.1f} µm")
     print(f"  D50 (median)       : {psd['D50']:.1f} µm")
@@ -528,6 +768,8 @@ def run_pipeline(
     print(f"  Uniformity           : {psd['uniformity'].upper()}")
     if psd['bimodal_flag']:
         print(f"  ⚠️  BIMODAL distribution detected — possible grinder issue")
+    if psd['clump_warning']:
+        print(f"  ⚠️  {psd['clump_warning']}")
     print(f"{'─'*40}\n")
 
     # Plot
@@ -611,7 +853,7 @@ def cli():
     # Run inference
     infer = subparsers.add_parser("infer", help="Run pipeline on an image")
     infer.add_argument("image", help="Path to input image")
-    infer.add_argument("--model", default="yolov8n-seg.pt", help="Model weights")
+    infer.add_argument("--model", default="best.pt", help="Model weights")
     infer.add_argument("--conf", type=float, default=0.25)
     infer.add_argument("--debug", action="store_true")
     infer.add_argument("--save-plot", default=None, help="Save PSD plot to path")

@@ -18,12 +18,23 @@ export interface PsdResult {
   uniformity: 'good' | 'moderate' | 'poor';
 }
 
+export interface QualityWarning {
+  code: string;
+  severity: 'error' | 'warning' | 'info';
+  message: string;
+  tip: string;
+}
+
 export interface AnalyzeResponse {
   success: boolean;
   psd: PsdResult;
   grind_category: string;
   classification_message: string;
   scale_px_per_mm: number;
+  n_clumps: number;
+  n_silverskin: number;
+  clump_ratio: number;
+  quality_warnings?: QualityWarning[];
 }
 
 export interface RecommendPayload {
@@ -113,7 +124,14 @@ export async function analyzePhoto(file: File, brewMethod: string = 'pour_over')
 
   if (!resp.ok) {
     const err = await resp.json().catch(() => ({ detail: 'Unknown error' }));
-    throw new Error(err.detail || `Analysis failed (${resp.status})`);
+    const detail = err.detail;
+    // If detail is an object with message + quality_warnings, attach warnings
+    if (typeof detail === 'object' && detail.message) {
+      const error: any = new Error(detail.message);
+      error.quality_warnings = detail.quality_warnings || [];
+      throw error;
+    }
+    throw new Error(typeof detail === 'string' ? detail : `Analysis failed (${resp.status})`);
   }
 
   return resp.json();

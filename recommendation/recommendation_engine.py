@@ -28,6 +28,20 @@ def clamp(value: float, minimum: float, maximum: float) -> float:
     return max(minimum, min(value, maximum))
 
 
+def format_setting(value: float) -> str:
+    """Format a dial setting as a fraction string: 2.333→'2⅓', 2.667→'2⅔', 3.0→'3'."""
+    whole = int(value)
+    frac = round((value - whole) * 3) / 3
+    if abs(frac - 1/3) < 0.05:
+        return f"{whole}⅓"
+    elif abs(frac - 2/3) < 0.05:
+        return f"{whole}⅔"
+    else:
+        if abs(frac - 1.0) < 0.05:
+            return str(whole + 1)
+        return str(whole)
+
+
 def _normalize_taste_feedback(taste_feedback: Any) -> List[str]:
     """Accepts either a string or a list of strings and normalizes to lowercase list."""
     if taste_feedback is None:
@@ -75,10 +89,10 @@ def _analyze_brew_variables(
         if len(ideal_temp) == 2:
             analysis["temp_range"] = ideal_temp
             if water_temp_c < ideal_temp[0]:
-                issues.append(f"Water temperature ({water_temp_c}°C) is below ideal range ({ideal_temp[0]}–{ideal_temp[1]}°C). Consider raising it.")
+                issues.append(f"Water temperature ({water_temp_c:.1f}°C) is below ideal range ({ideal_temp[0]}–{ideal_temp[1]}°C). Consider raising it.")
                 analysis["temp_status"] = "low"
             elif water_temp_c > ideal_temp[1]:
-                issues.append(f"Water temperature ({water_temp_c}°C) is above ideal range ({ideal_temp[0]}–{ideal_temp[1]}°C). Consider lowering it.")
+                issues.append(f"Water temperature ({water_temp_c:.1f}°C) is above ideal range ({ideal_temp[0]}–{ideal_temp[1]}°C). Consider lowering it.")
                 analysis["temp_status"] = "high"
             else:
                 analysis["temp_status"] = "ok"
@@ -219,13 +233,18 @@ def recommend_filter(payload: Dict[str, Any], rules: Dict[str, Any] | None = Non
     tolerance_um = max(absolute_tolerance, abs(fitted_slope) * 0.5)
     within_tolerance = abs(d50_error_um) <= tolerance_um
 
-    raw_adjustment_steps = (target_d50 - current_d50) / fitted_slope
-    rounded_adjustment_steps = int(round(raw_adjustment_steps))
-    unclamped_new_setting = current_setting + rounded_adjustment_steps
-    clamped_new_setting = clamp(unclamped_new_setting, dial_range_min, dial_range_max)
+    # Calculate adjustment in notch increments (1/3 of a full step)
+    NOTCH_SIZE = 1 / 3  # each notch is 1/3 of a setting unit
+    raw_adjustment_settings = (target_d50 - current_d50) / fitted_slope
+    # Round to nearest notch (1/3 step)
+    raw_notches = raw_adjustment_settings / NOTCH_SIZE
+    rounded_notches = int(round(raw_notches))
+    adjustment_in_settings = rounded_notches * NOTCH_SIZE
+    unclamped_new_setting = current_setting + adjustment_in_settings
+    clamped_new_setting = round(clamp(unclamped_new_setting, dial_range_min, dial_range_max) * 3) / 3
 
-    # If clamping changed the value, recompute final displayed steps from actual movement.
-    final_steps = int(round(clamped_new_setting - current_setting))
+    # Steps = number of notch clicks
+    final_notches = int(round((clamped_new_setting - current_setting) / NOTCH_SIZE))
 
     under = groups["underextracted_signals"]
     over = groups["overextracted_signals"]
@@ -264,13 +283,13 @@ def recommend_filter(payload: Dict[str, Any], rules: Dict[str, Any] | None = Non
             "d50_error_um": round(d50_error_um, 2),
             "tolerance_um": round(tolerance_um, 2),
             "within_tolerance": within_tolerance,
-            "raw_adjustment_steps": round(raw_adjustment_steps, 2),
+            "raw_adjustment_notches": rounded_notches,
         },
         "grind_recommendation": {
             "direction": "hold",
             "steps": 0,
-            "from_setting": current_setting,
-            "to_setting": current_setting,
+            "from_setting": format_setting(current_setting),
+            "to_setting": format_setting(current_setting),
             "message": messages["fallback"],
         },
         "secondary_advice": {
@@ -302,8 +321,8 @@ def recommend_filter(payload: Dict[str, Any], rules: Dict[str, Any] | None = Non
         response["grind_recommendation"] = {
             "direction": "none",
             "steps": 0,
-            "from_setting": current_setting,
-            "to_setting": current_setting,
+            "from_setting": format_setting(current_setting),
+            "to_setting": format_setting(current_setting),
             "message": messages["balanced"],
         }
         response["confidence"] = {"grind": "medium", "secondary": "none"}
@@ -315,8 +334,8 @@ def recommend_filter(payload: Dict[str, Any], rules: Dict[str, Any] | None = Non
         response["grind_recommendation"] = {
             "direction": "hold",
             "steps": 0,
-            "from_setting": current_setting,
-            "to_setting": current_setting,
+            "from_setting": format_setting(current_setting),
+            "to_setting": format_setting(current_setting),
             "message": messages["mixed"],
         }
         response["secondary_advice"] = {
@@ -335,8 +354,8 @@ def recommend_filter(payload: Dict[str, Any], rules: Dict[str, Any] | None = Non
         response["grind_recommendation"] = {
             "direction": "hold",
             "steps": 0,
-            "from_setting": current_setting,
-            "to_setting": current_setting,
+            "from_setting": format_setting(current_setting),
+            "to_setting": format_setting(current_setting),
             "message": (
                 f"Your grind has a bimodal distribution: {fines_pct}% fines "
                 f"and {boulders_pct}% boulders. Changing the grind setting "
@@ -360,10 +379,10 @@ def recommend_filter(payload: Dict[str, Any], rules: Dict[str, Any] | None = Non
     if uniformity == "poor" and not bimodal_flag:
         response["mode"] = "poor_uniformity"
         response["grind_recommendation"] = {
-            "direction": "hold" if within_tolerance else ("finer" if final_steps < 0 else "coarser"),
-            "steps": 0 if within_tolerance else abs(final_steps),
-            "from_setting": current_setting,
-            "to_setting": current_setting if within_tolerance else clamped_new_setting,
+            "direction": "hold" if within_tolerance else ("finer" if final_notches < 0 else "coarser"),
+            "steps": 0 if within_tolerance else abs(final_notches),
+            "from_setting": format_setting(current_setting),
+            "to_setting": format_setting(current_setting) if within_tolerance else format_setting(clamped_new_setting),
             "message": (
                 f"Your grind has wide distribution (span={span:.2f}, uniformity=poor). "
                 f"Only {uniform_pct}% of particles are in the target range. "
@@ -397,26 +416,29 @@ def recommend_filter(payload: Dict[str, Any], rules: Dict[str, Any] | None = Non
 
     # 3) If grind is meaningfully off target, prioritize grind first
     if not within_tolerance:
-        if final_steps < 0:
+        if final_notches < 0:
             direction = "finer"
-        elif final_steps > 0:
+        elif final_notches > 0:
             direction = "coarser"
         else:
             direction = "hold"
 
+        from_str = format_setting(current_setting)
+        to_str = format_setting(clamped_new_setting)
+        notch_word = "notch" if abs(final_notches) == 1 else "notches"
         if direction == "finer":
-            msg = f"Your grounds are coarser than target. Go finer from {current_setting:g} to {clamped_new_setting:g}."
+            msg = f"Your grounds are coarser than target. Go finer {abs(final_notches)} {notch_word}: {from_str} → {to_str}."
         elif direction == "coarser":
-            msg = f"Your grounds are finer than target. Go coarser from {current_setting:g} to {clamped_new_setting:g}."
+            msg = f"Your grounds are finer than target. Go coarser {abs(final_notches)} {notch_word}: {from_str} → {to_str}."
         else:
             msg = "Your grind appears off target, but the new setting was clamped by the grinder's dial range."
 
         response["mode"] = "primary_grind"
         response["grind_recommendation"] = {
             "direction": direction,
-            "steps": abs(final_steps),
-            "from_setting": current_setting,
-            "to_setting": clamped_new_setting,
+            "steps": abs(final_notches),
+            "from_setting": from_str,
+            "to_setting": to_str,
             "message": msg,
         }
         response["confidence"] = {"grind": "high", "secondary": "none"}
@@ -430,8 +452,8 @@ def recommend_filter(payload: Dict[str, Any], rules: Dict[str, Any] | None = Non
         response["grind_recommendation"] = {
             "direction": "hold",
             "steps": 0,
-            "from_setting": current_setting,
-            "to_setting": current_setting,
+            "from_setting": format_setting(current_setting),
+            "to_setting": format_setting(current_setting),
             "message": "Your grind is already close to target.",
         }
         response["secondary_advice"] = {
@@ -448,8 +470,8 @@ def recommend_filter(payload: Dict[str, Any], rules: Dict[str, Any] | None = Non
         response["grind_recommendation"] = {
             "direction": "hold",
             "steps": 0,
-            "from_setting": current_setting,
-            "to_setting": current_setting,
+            "from_setting": format_setting(current_setting),
+            "to_setting": format_setting(current_setting),
             "message": "Your grind is already close to target.",
         }
         response["secondary_advice"] = {

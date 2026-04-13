@@ -50,12 +50,23 @@
           <select id="brewMethod" bind:value={formData.brewMethod} required
             class="w-full border border-neutral-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500">
             <option value="">Select method</option>
-            <option>Pour Over</option>
-            <option>French Press</option>
-            <option>Espresso</option>
-            <option>AeroPress</option>
-            <option>Chemex</option>
-            <option>Moka Pot</option>
+            <optgroup label="Pour Over">
+              <option>V60</option>
+              <option>Chemex</option>
+              <option>Kalita Wave</option>
+              <option>Hario Switch</option>
+              <option>Pour Over (Other)</option>
+            </optgroup>
+            <optgroup label="Immersion">
+              <option>French Press</option>
+              <option>AeroPress</option>
+              <option>AeroPress (Inverted)</option>
+              <option>Cold Brew</option>
+            </optgroup>
+            <optgroup label="Pressure">
+              <option>Espresso</option>
+              <option>Moka Pot</option>
+            </optgroup>
           </select>
         </div>
         <div>

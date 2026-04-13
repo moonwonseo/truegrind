@@ -28,7 +28,9 @@ from pydantic import BaseModel
 
 from grind_pipeline import (
     detect_quarter,
+    crop_around_quarter,
     segment_particles,
+    classify_detections,
     split_clusters,
     compute_diameters_um,
     compute_psd,
@@ -66,6 +68,7 @@ app.add_middleware(
 # ─── Model loading (once at startup) ────────────────────────
 
 MODEL_PATH = os.environ.get("MODEL_PATH", "best.pt")
+MAX_IMAGE_DIM = 2400   # balance between resolution for ground detection and speed
 _model = None
 
 
@@ -80,10 +83,73 @@ def get_model():
     return _model
 
 
+@app.on_event("startup")
+def warmup_model():
+    """Pre-load model and run a dummy inference to warm up MPS/CUDA."""
+    import time
+    t0 = time.time()
+    model = get_model()
+    # Dummy inference to trigger MPS/CUDA graph compilation
+    dummy = np.zeros((640, 640, 3), dtype=np.uint8)
+    model.predict(dummy, conf=0.5, verbose=False, device=get_device())
+    print(f"[API] Model warmed up in {time.time() - t0:.1f}s")
+
+
+def resize_for_speed(image: np.ndarray) -> tuple[np.ndarray, float]:
+    """
+    Downscale large images to MAX_IMAGE_DIM on the longest side.
+    Returns (resized_image, scale_factor) where scale_factor lets
+    us convert px_per_mm back to original image coordinates.
+    """
+    h, w = image.shape[:2]
+    longest = max(h, w)
+    if longest <= MAX_IMAGE_DIM:
+        return image, 1.0
+    scale = MAX_IMAGE_DIM / longest
+    new_w, new_h = int(w * scale), int(h * scale)
+    resized = cv2.resize(image, (new_w, new_h), interpolation=cv2.INTER_AREA)
+    print(f"[Resize] {w}x{h} → {new_w}x{new_h} (scale={scale:.3f})")
+    return resized, scale
+
+
+def image_quality_checks(image: np.ndarray) -> list[dict]:
+    """
+    Run image-level quality checks (blur, contrast).
+    Returns a list of warning dicts: {code, severity, message, tip}
+    Called early — before quarter detection or segmentation.
+    """
+    warnings = []
+
+    # 1. Blur detection via Laplacian variance
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    lap_var = cv2.Laplacian(gray, cv2.CV_64F).var()
+    print(f"[Quality] Laplacian variance (blur): {lap_var:.1f}")
+    if lap_var < 10:
+        warnings.append({
+            "code": "blurry",
+            "severity": "error",
+            "message": "Image appears very blurry",
+            "tip": "Hold your phone steady or use a flat surface. Tap to focus on the grounds before shooting.",
+        })
+
+    # 2. Low contrast (poor lighting)
+    contrast = gray.std()
+    print(f"[Quality] Contrast (std): {contrast:.1f}")
+    if contrast < 15:
+        warnings.append({
+            "code": "low_contrast",
+            "severity": "warning",
+            "message": "Low contrast — poor lighting detected",
+            "tip": "Move to a well-lit area or use natural daylight. Avoid shadows over the grounds.",
+        })
+
+    return warnings
+
+
 # ─── Fellow Ode defaults ────────────────────────────────────
 
 FELLOW_ODE_DEFAULTS = {
-    "fitted_slope": 50,       # estimated µm per setting step
+    "fitted_slope": 102,      # calibrated: ~102 µm per step (275µm@1 → 1193µm@10)
     "dial_range_min": 1,
     "dial_range_max": 11,
     "grinder_model": "Fellow Ode Brew Grinder Gen 2",
@@ -147,28 +213,88 @@ async def analyze_photo(
         raise HTTPException(status_code=400, detail="Could not decode image. Send JPG or PNG.")
 
     try:
-        # Step 1: Quarter detection
-        px_per_mm = detect_quarter(image)
+        # Downscale large phone photos for speed
+        image, scale_factor = resize_for_speed(image)
+
+        # Run early quality checks (blur, contrast) on every image
+        early_warnings = image_quality_checks(image)
+
+        # Step 1: Quarter detection (on resized image)
+        px_per_mm, quarter_circle = detect_quarter(image)
         if px_per_mm is None:
+            # Add quarter-specific warnings
+            early_warnings.append({
+                "code": "no_quarter",
+                "severity": "error",
+                "message": "No US quarter detected in the image",
+                "tip": "Place a US quarter on the white paper next to your grounds. Make sure it's fully visible and not covered by grounds.",
+            })
+            early_warnings.append({
+                "code": "angle_warning",
+                "severity": "warning",
+                "message": "Photo may be taken at too steep an angle",
+                "tip": "Hold your phone directly above the grounds (bird's-eye view). An angled photo distorts the quarter shape and throws off measurements.",
+            })
             raise HTTPException(
                 status_code=422,
-                detail="No quarter detected. Place a US quarter on white paper next to your grounds."
+                detail={
+                    "message": "No quarter detected — see tips below to fix your photo.",
+                    "quality_warnings": early_warnings,
+                }
             )
 
-        # Step 2: Particle segmentation
+
+
+        # Note: cropping was removed — it cut off too many particles.
+
+        # Step 2: Particle segmentation (all 3 classes)
         model = get_model()
-        raw_particles = segment_particles(image, model, conf_threshold=0.25)
-        if not raw_particles:
+        all_detections = segment_particles(image, model, conf_threshold=0.25)
+        if not all_detections:
+            early_warnings.append({
+                "code": "no_particles",
+                "severity": "error",
+                "message": "No coffee particles detected",
+                "tip": "Make sure your grounds are spread on a white surface with good lighting. Dark surfaces make detection difficult.",
+            })
             raise HTTPException(
                 status_code=422,
-                detail="No particles detected. Make sure grounds are spread on a white surface."
+                detail={
+                    "message": "No particles detected — see tips below.",
+                    "quality_warnings": early_warnings,
+                }
             )
 
-        # Step 2b: Split oversized clusters into individual particles
-        particles = split_clusters(raw_particles, px_per_mm)
+        # Step 2b: Classify into grounds / silverskin / clumps
+        detection_info = classify_detections(all_detections)
+        grounds = detection_info["grounds"]
 
-        # Step 3: Convert to microns
-        diameters_um = compute_diameters_um(particles, px_per_mm)
+        if not grounds:
+            early_warnings.append({
+                "code": "only_clumps",
+                "severity": "error",
+                "message": "Only clumps detected — no individual particles found",
+                "tip": "Break up the clumps by gently tapping or using a WDT tool. Spread the grounds more thinly on the paper.",
+            })
+            raise HTTPException(
+                status_code=422,
+                detail={
+                    "message": "No individual grounds detected — only clumps found.",
+                    "quality_warnings": early_warnings,
+                }
+            )
+
+        # Step 2c: Split oversized clusters into individual particles
+        grounds = split_clusters(grounds, px_per_mm)
+
+        # Step 3: Convert to microns (grounds only — silverskin excluded)
+        diameters_um = compute_diameters_um(grounds, px_per_mm)
+
+        # DEBUG: Show diameter stats
+        diameters_px = [p["diameter_px"] for p in grounds]
+        print(f"[Debug] px_per_mm={px_per_mm:.2f} | particles={len(grounds)}")
+        print(f"[Debug] diameter_px: min={min(diameters_px):.1f} median={sorted(diameters_px)[len(diameters_px)//2]:.1f} max={max(diameters_px):.1f}")
+        print(f"[Debug] diameter_um: min={min(diameters_um):.0f} median={sorted(diameters_um)[len(diameters_um)//2]:.0f} max={max(diameters_um):.0f}")
 
         # Step 4: PSD
         psd = compute_psd(diameters_um)
@@ -176,6 +302,37 @@ async def analyze_photo(
         # Step 5: Classification
         grind_category = classify_grind(psd["D50"])
         classification_message = classify_grind_message(psd["D50"], brew_method=brew_method)
+
+        # Step 6: Merge early quality checks with post-analysis checks
+        # (early_warnings already has blur, contrast, quarter-cutoff)
+        # Add particle count and clump ratio checks
+        # Post-analysis accuracy warnings (non-blocking, shown on results page)
+
+        # Calibration check: if px_per_mm is unusually low, the quarter may be
+        # partially visible or detected wrong (normal range ~15-35 for phone photos)
+        if px_per_mm < 12:
+            early_warnings.append({
+                "code": "low_calibration",
+                "severity": "warning",
+                "message": "Quarter may be partially visible — measurements could be off",
+                "tip": "Make sure the entire quarter is fully visible in the frame for accurate calibration.",
+            })
+
+        if psd["n_particles"] < 15:
+            early_warnings.append({
+                "code": "few_particles",
+                "severity": "warning",
+                "message": f"Only {psd['n_particles']} particles detected — results may not be representative",
+                "tip": "Spread more grounds on the paper for a better sample (aim for 50+ particles).",
+            })
+        if detection_info["clump_ratio"] > 0.3:
+            early_warnings.append({
+                "code": "excessive_clumping",
+                "severity": "warning",
+                "message": f"High clump ratio ({detection_info['clump_ratio']:.0%}) — many grounds are stuck together",
+                "tip": "Break up clumps before photographing for more accurate particle sizing.",
+            })
+        quality_warnings = early_warnings
 
         return {
             "success": True,
@@ -195,6 +352,13 @@ async def analyze_photo(
             "grind_category": grind_category,
             "classification_message": classification_message,
             "scale_px_per_mm": round(px_per_mm, 2),
+            # 3-class breakdown
+            "n_silverskin": detection_info["n_silverskin"],
+            "n_clumps": len(detection_info["clumps"]),
+            "clump_ratio": round(detection_info["clump_ratio"], 3),
+            "clump_warning": detection_info["clump_warning"],
+            # Image quality
+            "quality_warnings": quality_warnings,
         }
 
     except HTTPException:

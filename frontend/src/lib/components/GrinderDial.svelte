@@ -10,16 +10,28 @@
    */
 
   let { value = $bindable(5), min = 1, max = 11 }: { value: number; min?: number; max?: number } = $props();
+  const STEP = 1/3; // Fellow Ode has 2 notches between each integer (thirds)
 
   let isDragging = $state(false);
   let showInput = $state(false);
   let inputValue = $state('');
   let dialElement: SVGElement;
 
+  function formatSetting(val: number): string {
+    const whole = Math.floor(val);
+    const frac = Math.round((val - whole) * 3) / 3;
+    if (Math.abs(frac - 1/3) < 0.05) return `${whole}⅓`;
+    if (Math.abs(frac - 2/3) < 0.05) return `${whole}⅔`;
+    if (Math.abs(frac - 1.0) < 0.05) return `${whole + 1}`;
+    return `${whole}`;
+  }
+
   const TOTAL_STEPS = max - min + 1;
   const RADIUS = 100;
   const TICK_INNER = 72;
   const TICK_OUTER = 85;
+  const SUB_TICK_INNER = 78;  // shorter sub-ticks
+  const SUB_TICK_OUTER = 85;
   const LABEL_RADIUS = 58;
   const INDICATOR_RADIUS = 90;
 
@@ -38,7 +50,9 @@
     if (a < -20) a += 360;
     if (a > SWEEP + 20) a = SWEEP;
     const fraction = Math.max(0, Math.min(1, a / SWEEP));
-    return Math.round(min + fraction * (max - min));
+    const raw = min + fraction * (max - min);
+    // Snap to nearest 1/3 step
+    return Math.round(raw / STEP) * STEP;
   }
 
   function getPointOnCircle(angleDeg: number, r: number): { x: number; y: number } {
@@ -74,7 +88,7 @@
   }
 
   function handleNumberSubmit() {
-    const num = parseInt(inputValue);
+    const num = parseFloat(inputValue);
     if (!isNaN(num) && num >= min && num <= max) {
       value = num;
     }
@@ -87,7 +101,7 @@
     if (e.key === 'Escape') { showInput = false; inputValue = ''; }
   }
 
-  // Tick marks and labels
+  // Integer tick marks and labels
   let ticks = $derived(
     Array.from({ length: TOTAL_STEPS }, (_, i) => {
       const val = min + i;
@@ -96,6 +110,19 @@
       const outer = getPointOnCircle(angle, TICK_OUTER);
       const label = getPointOnCircle(angle, LABEL_RADIUS);
       return { val, angle, inner, outer, label };
+    })
+  );
+
+  // Sub-tick marks (2 between each integer = thirds)
+  let subTicks = $derived(
+    Array.from({ length: (TOTAL_STEPS - 1) * 2 }, (_, i) => {
+      const intIndex = Math.floor(i / 2);
+      const subIndex = (i % 2) + 1; // 1 or 2
+      const val = min + intIndex + subIndex / 3;
+      const angle = valueToAngle(val);
+      const inner = getPointOnCircle(angle, SUB_TICK_INNER);
+      const outer = getPointOnCircle(angle, SUB_TICK_OUTER);
+      return { val, angle, inner, outer };
     })
   );
 
@@ -157,13 +184,24 @@
     <!-- Active arc -->
     <path d={activeArc} fill="none" stroke="url(#active-gradient)" stroke-width="6" stroke-linecap="round" />
 
-    <!-- Tick marks -->
+    <!-- Sub-tick marks (2 between each integer) -->
+    {#each subTicks as st}
+      <line
+        x1={st.inner.x} y1={st.inner.y}
+        x2={st.outer.x} y2={st.outer.y}
+        stroke={Math.abs(st.val - value) < 0.01 ? '#92400e' : '#c4b8a8'}
+        stroke-width="1"
+        stroke-linecap="round"
+      />
+    {/each}
+
+    <!-- Integer tick marks -->
     {#each ticks as tick}
       <line
         x1={tick.inner.x} y1={tick.inner.y}
         x2={tick.outer.x} y2={tick.outer.y}
-        stroke={tick.val === value ? '#92400e' : '#a89888'}
-        stroke-width={tick.val === value ? 3 : 1.5}
+        stroke={Math.abs(tick.val - value) < 0.01 ? '#92400e' : '#a89888'}
+        stroke-width={Math.abs(tick.val - value) < 0.01 ? 3 : 1.5}
         stroke-linecap="round"
       />
       <!-- svelte-ignore a11y_click_events_have_key_events -->
@@ -172,7 +210,7 @@
         x={tick.label.x} y={tick.label.y}
         text-anchor="middle"
         dominant-baseline="central"
-        class="tick-label {tick.val === value ? 'active' : ''}"
+        class="tick-label {Math.abs(tick.val - value) < 0.5 ? 'active' : ''}"
         onclick={() => value = tick.val}
       >
         {tick.val}
@@ -205,7 +243,7 @@
       <!-- svelte-ignore a11y_click_events_have_key_events -->
       <!-- svelte-ignore a11y_no_static_element_interactions -->
       <div class="setting-display" onclick={() => { showInput = true; inputValue = String(value); }}>
-        <span class="setting-number">{value}</span>
+        <span class="setting-number">{formatSetting(value)}</span>
         <span class="setting-label">Setting</span>
         <span class="setting-hint">tap to type</span>
       </div>
