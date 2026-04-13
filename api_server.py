@@ -240,7 +240,7 @@ async def analyze_photo(
         early_warnings = image_quality_checks(image)
 
         # Step 1: Quarter detection (on resized image)
-        px_per_mm, quarter_circle = detect_quarter(image)
+        px_per_mm, quarter_circle, quarter_aspect_ratio = detect_quarter(image)
         if px_per_mm is None:
             # Add quarter-specific warnings
             early_warnings.append({
@@ -262,6 +262,16 @@ async def analyze_photo(
                     "quality_warnings": early_warnings,
                 }
             )
+
+        # Check quarter aspect ratio for camera angle
+        ANGLE_THRESHOLD = 0.92
+        if quarter_aspect_ratio is not None and quarter_aspect_ratio < ANGLE_THRESHOLD:
+            early_warnings.append({
+                "code": "camera_angle",
+                "severity": "error",
+                "message": f"Camera angle too steep — quarter appears elliptical ({quarter_aspect_ratio:.2f})",
+                "tip": "Hold your phone directly overhead (bird's-eye view). The quarter should look like a perfect circle, not an oval.",
+            })
 
 
 

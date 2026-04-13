@@ -61,27 +61,24 @@ def detect_quarter(image_bgr: np.ndarray, debug: bool = False) -> float | None:
     """
     Detect a US quarter in the image using Hough Circle Transform.
 
-    Returns px_per_mm (float) or None if no quarter detected.
-
-    The quarter should be:
-      - On a white/light background
-      - Unobstructed (not under coffee grounds)
-      - In any corner of the frame
+    Returns (px_per_mm, circle_info, aspect_ratio) or (None, None, None).
+    
+    aspect_ratio is minor_axis/major_axis from ellipse fitting:
+      - 1.0 = perfect circle (phone perfectly overhead)
+      - < 0.92 = tilted camera, measurements will be inaccurate
     """
     gray = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2GRAY)
     blurred = cv2.GaussianBlur(gray, (9, 9), 2)
 
-    # Estimate expected quarter radius range in pixels.
-    # A quarter is ~24mm. Assume image captures roughly 150-300mm of width.
     h, w = gray.shape
-    min_r = int(w * 0.04)   # quarter ~8% of frame width minimum
-    max_r = int(w * 0.18)   # quarter ~18% of frame width maximum
+    min_r = int(w * 0.04)
+    max_r = int(w * 0.18)
 
     circles = cv2.HoughCircles(
         blurred,
         cv2.HOUGH_GRADIENT,
         dp=1.2,
-        minDist=w // 4,       # only one quarter expected
+        minDist=w // 4,
         param1=60,
         param2=35,
         minRadius=min_r,
@@ -90,49 +87,75 @@ def detect_quarter(image_bgr: np.ndarray, debug: bool = False) -> float | None:
 
     if circles is None:
         print("[WARNING] No quarter detected. Check image or adjust Hough params.")
-        return None, None
+        return None, None, None
 
     circles = np.round(circles[0, :]).astype(int)
 
-    # Pick the most silver-colored circle (highest mean gray value ~180-220)
     best_circle = None
     best_score = -1
 
     for (cx, cy, r) in circles:
-        # Sample pixels inside circle
         mask = np.zeros_like(gray)
         cv2.circle(mask, (cx, cy), r, 255, -1)
         mean_val = cv2.mean(gray, mask=mask)[0]
 
-        # Quarter is silver: expect mean brightness 150-230
         if 140 < mean_val < 235:
-            score = 1.0 - abs(mean_val - 190) / 50   # prefer ~190 gray
+            score = 1.0 - abs(mean_val - 190) / 50
             if score > best_score:
                 best_score = score
                 best_circle = (cx, cy, r)
 
     if best_circle is None:
         print("[WARNING] Circles found but none matched quarter brightness profile.")
-        return None, None
+        return None, None, None
 
     cx, cy, r = best_circle
-    diameter_px = r * 2
-    px_per_mm = diameter_px / QUARTER_DIAMETER_MM
 
-    print(f"[Quarter] Detected at ({cx}, {cy}), radius={r}px")
+    # ── Ellipse fitting for angle detection ──
+    # Extract the quarter region and find its contour for ellipse fitting
+    quarter_mask = np.zeros_like(gray)
+    cv2.circle(quarter_mask, (cx, cy), int(r * 1.1), 255, -1)  # slightly larger than detected
+    
+    # Threshold the quarter region for a tighter contour
+    quarter_region = cv2.bitwise_and(gray, gray, mask=quarter_mask)
+    # The quarter is bright (silver) — threshold at brightness midpoint
+    _, quarter_thresh = cv2.threshold(quarter_region, 120, 255, cv2.THRESH_BINARY)
+    contours, _ = cv2.findContours(quarter_thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    
+    aspect_ratio = 1.0  # default: perfect circle
+    effective_diameter_px = r * 2  # default: use Hough radius
+    
+    if contours:
+        # Use the largest contour (should be the quarter)
+        cnt = max(contours, key=cv2.contourArea)
+        if len(cnt) >= 5:  # fitEllipse requires at least 5 points
+            ellipse = cv2.fitEllipse(cnt)
+            major_axis = max(ellipse[1])
+            minor_axis = min(ellipse[1])
+            if major_axis > 0:
+                aspect_ratio = minor_axis / major_axis
+                # Use the minor axis for calibration — it's less affected by tilt
+                effective_diameter_px = minor_axis
+                print(f"[Quarter] Ellipse: major={major_axis:.1f}px, minor={minor_axis:.1f}px, "
+                      f"aspect_ratio={aspect_ratio:.3f}")
+    
+    px_per_mm = effective_diameter_px / QUARTER_DIAMETER_MM
+
+    print(f"[Quarter] Detected at ({cx}, {cy}), radius={r}px, aspect_ratio={aspect_ratio:.3f}")
     print(f"[Quarter] Scale: {px_per_mm:.2f} px/mm  ({px_per_mm*1000:.1f} px/m)")
 
     if debug:
         vis = image_bgr.copy()
         cv2.circle(vis, (cx, cy), r, (0, 255, 0), 3)
         cv2.circle(vis, (cx, cy), 3, (0, 0, 255), -1)
-        cv2.putText(vis, f"{diameter_px}px = 24.26mm", (cx - 60, cy - r - 10),
+        cv2.putText(vis, f"{effective_diameter_px:.0f}px = 24.26mm (AR={aspect_ratio:.2f})",
+                    (cx - 80, cy - r - 10),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 200, 0), 2)
         cv2.imshow("Quarter Detection", vis)
         cv2.waitKey(0)
         cv2.destroyAllWindows()
 
-    return px_per_mm, (cx, cy, r)
+    return px_per_mm, (cx, cy, r), aspect_ratio
 
 
 def crop_around_quarter(
@@ -706,7 +729,7 @@ def run_pipeline(
     print(f"{'='*50}")
 
     # Step 1: Quarter detection
-    px_per_mm, _ = detect_quarter(image, debug=debug)
+    px_per_mm, _, _ = detect_quarter(image, debug=debug)
     if px_per_mm is None:
         raise RuntimeError(
             "Quarter not detected. Ensure a US quarter is visible on white paper."
