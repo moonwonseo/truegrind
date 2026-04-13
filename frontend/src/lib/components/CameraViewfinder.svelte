@@ -257,8 +257,8 @@
   }
 
   .quarter-circle {
-    width: 52px;
-    height: 52px;
+    width: 22vw;
+    height: 22vw;
     border: 2.5px dashed rgba(255, 214, 0, 0.85);
     border-radius: 50%;
     display: flex;
@@ -275,14 +275,14 @@
 
   .quarter-label {
     color: rgba(255, 214, 0, 0.95);
-    font-size: 11px;
+    font-size: 16px;
     font-weight: 700;
     letter-spacing: -0.5px;
   }
 
   .quarter-tip-text {
     color: rgba(255, 214, 0, 0.9);
-    font-size: 10px;
+    font-size: 12px;
     font-weight: 500;
     text-shadow: 0 1px 3px rgba(0,0,0,0.6);
     white-space: nowrap;

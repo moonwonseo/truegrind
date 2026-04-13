@@ -24,7 +24,9 @@ import numpy as np
 from dotenv import load_dotenv
 from fastapi import FastAPI, File, UploadFile, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from PIL import Image
 from pydantic import BaseModel
+import io
 
 from grind_pipeline import (
     detect_quarter,
@@ -204,13 +206,31 @@ async def analyze_photo(
 
     Returns D50, distribution breakdown, classification message, etc.
     """
-    # Read + decode image
+    # Read + decode image (supports HEIC, JPEG, PNG)
     contents = await file.read()
-    np_arr = np.frombuffer(contents, np.uint8)
-    image = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
+    filename = (file.filename or "").lower()
+    image = None
+
+    # Try HEIC/HEIF first if filename suggests it
+    if filename.endswith(('.heic', '.heif')):
+        try:
+            import pillow_heif
+            pillow_heif.register_heif_opener()
+            pil_img = Image.open(io.BytesIO(contents))
+            pil_img = pil_img.convert('RGB')
+            image = cv2.cvtColor(np.array(pil_img), cv2.COLOR_RGB2BGR)
+            print(f"[Decode] HEIC decoded via pillow-heif: {image.shape[1]}x{image.shape[0]}")
+        except Exception as e:
+            print(f"[Decode] HEIC decode failed ({e}), falling back to cv2")
+            image = None
+
+    # Fallback: standard cv2 decode (JPEG, PNG, etc.)
+    if image is None:
+        np_arr = np.frombuffer(contents, np.uint8)
+        image = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
 
     if image is None:
-        raise HTTPException(status_code=400, detail="Could not decode image. Send JPG or PNG.")
+        raise HTTPException(status_code=400, detail="Could not decode image. Send JPG, PNG, or HEIC.")
 
     try:
         # Downscale large phone photos for speed
