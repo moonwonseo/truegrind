@@ -257,8 +257,8 @@
   }
 
   .quarter-circle {
-    width: 22vw;
-    height: 22vw;
+    width: clamp(100px, 30vw, 140px);
+    height: clamp(100px, 30vw, 140px);
     border: 2.5px dashed rgba(255, 214, 0, 0.85);
     border-radius: 50%;
     display: flex;

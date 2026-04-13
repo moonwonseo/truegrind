@@ -352,7 +352,7 @@
             </div>
           {/if}
         </button>
-        <input bind:this={fileInput} type="file" accept="image/*" onchange={handleFileChange} class="hidden" />
+        <input bind:this={fileInput} type="file" accept="image/*,.heic,.heif,image/heic,image/heif" onchange={handleFileChange} class="hidden" />
 
         {#if !uploadedImage}
           <div class="flex gap-2">
