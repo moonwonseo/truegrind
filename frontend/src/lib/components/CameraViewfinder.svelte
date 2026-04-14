@@ -7,7 +7,7 @@
    */
 
   let { onCapture, onClose }: {
-    onCapture: (file: File) => void;
+    onCapture: (file: File, tiltAngleDeg: number) => void;
     onClose: () => void;
   } = $props();
 
@@ -128,11 +128,13 @@
     const ctx = canvasEl.getContext('2d')!;
     ctx.drawImage(videoEl, 0, 0, w, h);
 
+    const capturedTilt = tiltAngle ?? 0;
+
     canvasEl.toBlob(blob => {
       if (!blob) return;
       const file = new File([blob], `grounds_${Date.now()}.jpg`, { type: 'image/jpeg' });
       stopCamera();
-      onCapture(file);
+      onCapture(file, capturedTilt);
     }, 'image/jpeg', 0.92);
   }
 </script>

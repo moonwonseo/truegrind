@@ -57,15 +57,13 @@ GRIND_THRESHOLDS = {
 # STEP 1: QUARTER DETECTION
 # ─────────────────────────────────────────────────────────────
 
-def detect_quarter(image_bgr: np.ndarray, debug: bool = False) -> float | None:
+def detect_quarter(image_bgr: np.ndarray, debug: bool = False):
     """
     Detect a US quarter in the image using Hough Circle Transform.
 
-    Returns (px_per_mm, circle_info, aspect_ratio) or (None, None, None).
-    
-    aspect_ratio is minor_axis/major_axis from ellipse fitting:
-      - 1.0 = perfect circle (phone perfectly overhead)
-      - < 0.92 = tilted camera, measurements will be inaccurate
+    Returns (px_per_mm, (cx, cy, r)) or (None, None).
+    Calibration uses Hough circle diameter only.
+    Tilt correction is handled separately via IMU (camera) or ellipse fallback (uploads).
     """
     gray = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2GRAY)
     blurred = cv2.GaussianBlur(gray, (9, 9), 2)
@@ -87,7 +85,7 @@ def detect_quarter(image_bgr: np.ndarray, debug: bool = False) -> float | None:
 
     if circles is None:
         print("[WARNING] No quarter detected. Check image or adjust Hough params.")
-        return None, None, None
+        return None, None
 
     circles = np.round(circles[0, :]).astype(int)
 
@@ -107,73 +105,69 @@ def detect_quarter(image_bgr: np.ndarray, debug: bool = False) -> float | None:
 
     if best_circle is None:
         print("[WARNING] Circles found but none matched quarter brightness profile.")
-        return None, None, None
+        return None, None
 
     cx, cy, r = best_circle
-    hough_diameter_px = r * 2
+    diameter_px = r * 2
+    px_per_mm = diameter_px / QUARTER_DIAMETER_MM
 
-    # ── Ellipse fitting for angle detection ──
-    # Use edge detection (Canny) instead of brightness thresholding,
-    # because the quarter's engraved features confuse simple thresholding.
-    
-    aspect_ratio = 1.0  # default: perfect circle
-    effective_diameter_px = hough_diameter_px  # default: trust Hough
-    
-    # Create a tight mask around the detected quarter edge (annular ring)
-    inner_mask = np.zeros_like(gray)
-    outer_mask = np.zeros_like(gray)
-    cv2.circle(outer_mask, (cx, cy), int(r * 1.15), 255, -1)
-    cv2.circle(inner_mask, (cx, cy), int(r * 0.85), 255, -1)
-    edge_ring = cv2.subtract(outer_mask, inner_mask)
-    
-    # Apply Canny edge detection within the ring
-    quarter_region = cv2.bitwise_and(blurred, blurred, mask=edge_ring)
-    edges = cv2.Canny(quarter_region, 50, 150)
-    
-    # Find contours from edge map
-    contours, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    
-    if contours:
-        # Merge all edge points into one contour for ellipse fitting
-        all_points = np.vstack(contours)
-        if len(all_points) >= 5:
-            ellipse = cv2.fitEllipse(all_points)
-            major_axis = max(ellipse[1])
-            minor_axis = min(ellipse[1])
-            if major_axis > 0:
-                raw_aspect_ratio = minor_axis / major_axis
-                
-                # Sanity check: ellipse major axis should be close to Hough diameter
-                # If they disagree by >20%, the contour is unreliable — trust Hough
-                hough_agreement = min(major_axis, hough_diameter_px) / max(major_axis, hough_diameter_px)
-                
-                if hough_agreement > 0.80:
-                    aspect_ratio = raw_aspect_ratio
-                    effective_diameter_px = major_axis
-                    print(f"[Quarter] Ellipse: major={major_axis:.1f}px, minor={minor_axis:.1f}px, "
-                          f"aspect_ratio={aspect_ratio:.3f} (Hough agreement: {hough_agreement:.2f})")
-                else:
-                    print(f"[Quarter] Ellipse unreliable (major={major_axis:.1f}px vs Hough={hough_diameter_px}px, "
-                          f"agreement={hough_agreement:.2f}). Using Hough circle.")
-                    aspect_ratio = 1.0  # assume no tilt
-    
-    px_per_mm = effective_diameter_px / QUARTER_DIAMETER_MM
-
-    print(f"[Quarter] Detected at ({cx}, {cy}), radius={r}px, aspect_ratio={aspect_ratio:.3f}")
+    print(f"[Quarter] Detected at ({cx}, {cy}), radius={r}px")
     print(f"[Quarter] Scale: {px_per_mm:.2f} px/mm  ({px_per_mm*1000:.1f} px/m)")
 
     if debug:
         vis = image_bgr.copy()
         cv2.circle(vis, (cx, cy), r, (0, 255, 0), 3)
         cv2.circle(vis, (cx, cy), 3, (0, 0, 255), -1)
-        cv2.putText(vis, f"{effective_diameter_px:.0f}px = 24.26mm (AR={aspect_ratio:.2f})",
-                    (cx - 80, cy - r - 10),
+        cv2.putText(vis, f"{diameter_px}px = 24.26mm",
+                    (cx - 60, cy - r - 10),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 200, 0), 2)
         cv2.imshow("Quarter Detection", vis)
         cv2.waitKey(0)
         cv2.destroyAllWindows()
 
-    return px_per_mm, (cx, cy, r), aspect_ratio
+    return px_per_mm, (cx, cy, r)
+
+
+def estimate_quarter_aspect_ratio(image_bgr: np.ndarray, quarter_circle: tuple) -> float:
+    """
+    Estimate how elliptical the quarter appears using edge-based ellipse fitting.
+    Used ONLY as a fallback for uploaded photos (no IMU data).
+
+    Returns aspect_ratio (minor/major): 1.0 = circle, lower = more elliptical.
+    Returns 1.0 if estimation fails.
+    """
+    cx, cy, r = quarter_circle
+    gray = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2GRAY)
+    blurred = cv2.GaussianBlur(gray, (9, 9), 2)
+
+    # Annular ring around the quarter edge
+    inner_mask = np.zeros_like(gray)
+    outer_mask = np.zeros_like(gray)
+    cv2.circle(outer_mask, (cx, cy), int(r * 1.15), 255, -1)
+    cv2.circle(inner_mask, (cx, cy), int(r * 0.85), 255, -1)
+    edge_ring = cv2.subtract(outer_mask, inner_mask)
+
+    quarter_region = cv2.bitwise_and(blurred, blurred, mask=edge_ring)
+    edges = cv2.Canny(quarter_region, 50, 150)
+    contours, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+    if not contours:
+        return 1.0
+
+    all_points = np.vstack(contours)
+    if len(all_points) < 5:
+        return 1.0
+
+    ellipse = cv2.fitEllipse(all_points)
+    major_axis = max(ellipse[1])
+    minor_axis = min(ellipse[1])
+
+    if major_axis <= 0:
+        return 1.0
+
+    aspect_ratio = minor_axis / major_axis
+    print(f"[Ellipse Fallback] major={major_axis:.1f}px, minor={minor_axis:.1f}px, AR={aspect_ratio:.3f}")
+    return aspect_ratio
 
 
 def crop_around_quarter(
@@ -747,7 +741,7 @@ def run_pipeline(
     print(f"{'='*50}")
 
     # Step 1: Quarter detection
-    px_per_mm, _, _ = detect_quarter(image, debug=debug)
+    px_per_mm, _ = detect_quarter(image, debug=debug)
     if px_per_mm is None:
         raise RuntimeError(
             "Quarter not detected. Ensure a US quarter is visible on white paper."

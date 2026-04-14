@@ -37,11 +37,13 @@
 
   let fileInput: HTMLInputElement;
   let showCamera = $state(false);
+  let capturedTiltAngle = $state(0);
 
-  async function handleCameraCapture(file: File) {
+  async function handleCameraCapture(file: File, tiltAngleDeg: number) {
     showCamera = false;
     uploadedFile = file;
     uploadedImage = URL.createObjectURL(file);
+    capturedTiltAngle = tiltAngleDeg;
     analyzeGrind();
   }
 
@@ -58,6 +60,7 @@
     if (file) {
       uploadedFile = file;
       uploadedImage = URL.createObjectURL(file);
+      capturedTiltAngle = 0;
       analyzeGrind();
     }
   }
@@ -75,7 +78,7 @@
     qualityWarnings = [];
 
     try {
-      const result = await analyzePhoto(uploadedFile, surveyBrewMethod);
+      const result = await analyzePhoto(uploadedFile, surveyBrewMethod, capturedTiltAngle);
       psdResult = result.psd;
       classificationMessage = result.classification_message;
       grindCategory = result.grind_category;

@@ -113,11 +113,16 @@ export interface BrewMethodConfig {
 /**
  * Upload a photo for grind analysis.
  */
-export async function analyzePhoto(file: File, brewMethod: string = 'pour_over'): Promise<AnalyzeResponse> {
+export async function analyzePhoto(file: File, brewMethod: string = 'pour_over', tiltAngleDeg: number = 0): Promise<AnalyzeResponse> {
   const formData = new FormData();
   formData.append('file', file);
 
-  const resp = await fetch(`${API_BASE}/analyze?brew_method=${encodeURIComponent(brewMethod)}`, {
+  let url = `${API_BASE}/analyze?brew_method=${encodeURIComponent(brewMethod)}`;
+  if (tiltAngleDeg > 0) {
+    url += `&tilt_angle_deg=${tiltAngleDeg.toFixed(1)}`;
+  }
+
+  const resp = await fetch(url, {
     method: 'POST',
     body: formData,
   });

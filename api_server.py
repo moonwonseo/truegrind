@@ -30,6 +30,7 @@ import io
 
 from grind_pipeline import (
     detect_quarter,
+    estimate_quarter_aspect_ratio,
     crop_around_quarter,
     segment_particles,
     classify_detections,
@@ -200,6 +201,7 @@ def get_brew_methods():
 async def analyze_photo(
     file: UploadFile = File(...),
     brew_method: str = "pour_over",
+    tilt_angle_deg: float = 0.0,
 ):
     """
     Upload a photo of coffee grounds → get PSD analysis.
@@ -254,20 +256,13 @@ async def analyze_photo(
         early_warnings = image_quality_checks(image)
 
         # Step 1: Quarter detection (on resized image)
-        px_per_mm, quarter_circle, quarter_aspect_ratio = detect_quarter(image)
+        px_per_mm, quarter_circle = detect_quarter(image)
         if px_per_mm is None:
-            # Add quarter-specific warnings
             early_warnings.append({
                 "code": "no_quarter",
                 "severity": "error",
                 "message": "No US quarter detected in the image",
                 "tip": "Place a US quarter on the white paper next to your grounds. Make sure it's fully visible and not covered by grounds.",
-            })
-            early_warnings.append({
-                "code": "angle_warning",
-                "severity": "warning",
-                "message": "Photo may be taken at too steep an angle",
-                "tip": "Hold your phone directly above the grounds (bird's-eye view). An angled photo distorts the quarter shape and throws off measurements.",
             })
             raise HTTPException(
                 status_code=422,
@@ -276,18 +271,6 @@ async def analyze_photo(
                     "quality_warnings": early_warnings,
                 }
             )
-
-        # Check quarter aspect ratio for camera angle
-        ANGLE_THRESHOLD = 0.92
-        if quarter_aspect_ratio is not None and quarter_aspect_ratio < ANGLE_THRESHOLD:
-            import math
-            correction_pct = (1.0 / math.sqrt(quarter_aspect_ratio) - 1) * 100
-            early_warnings.append({
-                "code": "camera_angle",
-                "severity": "warning",
-                "message": f"Camera tilted — quarter elliptical ({quarter_aspect_ratio:.2f}). Corrected +{correction_pct:.0f}%.",
-                "tip": "Results have been mathematically adjusted, but a flat overhead photo gives the most reliable measurements.",
-            })
 
 
 
@@ -336,15 +319,47 @@ async def analyze_photo(
         # Step 3: Convert to microns (grounds only — silverskin excluded)
         diameters_um = compute_diameters_um(grounds, px_per_mm)
 
-        # Step 3b: Tilt correction — camera angle causes projected area to shrink
-        # by cos(θ), making equivalent diameters shrink by √cos(θ).
-        # aspect_ratio = cos(θ), so correction = 1 / √(aspect_ratio)
+        # Step 3b: Tilt correction
+        # Priority 1: IMU angle from frontend (camera captures on mobile)
+        # Priority 2: Ellipse fallback for uploads (only if AR < 0.85 = severe tilt)
         import math
-        if quarter_aspect_ratio is not None and quarter_aspect_ratio < 0.99:
-            tilt_correction = 1.0 / math.sqrt(quarter_aspect_ratio)
+        tilt_correction = 1.0
+        tilt_source = None
+
+        if tilt_angle_deg > 1.0:
+            # IMU data available — use directly
+            cos_theta = math.cos(math.radians(tilt_angle_deg))
+            if cos_theta > 0.01:  # safety clamp
+                tilt_correction = 1.0 / math.sqrt(cos_theta)
+                tilt_source = "imu"
+                print(f"[Tilt] IMU: {tilt_angle_deg:.1f}° → correction={tilt_correction:.3f} "
+                      f"(+{(tilt_correction - 1) * 100:.1f}%)")
+        elif quarter_circle is not None:
+            # No IMU — uploaded photo. Use conservative ellipse fallback.
+            upload_ar = estimate_quarter_aspect_ratio(image, quarter_circle)
+            if upload_ar < 0.85:  # severe tilt only — avoids false positives from engravings
+                tilt_correction = 1.0 / math.sqrt(upload_ar)
+                tilt_source = "ellipse"
+                print(f"[Tilt] Ellipse fallback: AR={upload_ar:.3f} → correction={tilt_correction:.3f} "
+                      f"(+{(tilt_correction - 1) * 100:.1f}%)")
+
+        if tilt_correction > 1.001:
             diameters_um = [d * tilt_correction for d in diameters_um]
-            print(f"[Tilt] aspect_ratio={quarter_aspect_ratio:.3f} → correction={tilt_correction:.3f} "
-                  f"(+{(tilt_correction - 1) * 100:.1f}%)")
+            correction_pct = (tilt_correction - 1) * 100
+            if tilt_source == "imu" and tilt_angle_deg > 10:
+                early_warnings.append({
+                    "code": "camera_angle",
+                    "severity": "warning",
+                    "message": f"Camera tilted ~{tilt_angle_deg:.0f}°. Corrected +{correction_pct:.0f}%.",
+                    "tip": "Results have been mathematically adjusted, but a flat overhead photo gives the most reliable measurements.",
+                })
+            elif tilt_source == "ellipse":
+                early_warnings.append({
+                    "code": "camera_angle",
+                    "severity": "warning",
+                    "message": f"Photo may have been taken at an angle. Corrected +{correction_pct:.0f}%.",
+                    "tip": "For best accuracy, retake the photo holding your phone flat overhead.",
+                })
 
         # DEBUG: Show diameter stats
         diameters_px = [p["diameter_px"] for p in grounds]
@@ -366,12 +381,19 @@ async def analyze_photo(
 
         # Calibration check: if px_per_mm is unusually low, the quarter may be
         # partially visible or detected wrong (normal range ~15-35 for phone photos)
-        if px_per_mm < 12:
+        if px_per_mm < 18:
             early_warnings.append({
                 "code": "low_calibration",
                 "severity": "warning",
-                "message": "Quarter may be partially visible — measurements could be off",
-                "tip": "Make sure the entire quarter is fully visible in the frame for accurate calibration.",
+                "message": f"Low calibration ({px_per_mm:.1f} px/mm) — quarter may be too far or partially visible",
+                "tip": "Move closer so the quarter fills ~¼ of the frame width, and ensure it's fully visible.",
+            })
+        elif px_per_mm > 50:
+            early_warnings.append({
+                "code": "high_calibration",
+                "severity": "warning",
+                "message": f"High calibration ({px_per_mm:.1f} px/mm) — quarter may be detected incorrectly",
+                "tip": "A small bright object may have been mistaken for the quarter. Ensure a real US quarter is in the frame.",
             })
 
         if psd["n_particles"] < 15:
