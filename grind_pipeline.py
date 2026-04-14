@@ -110,35 +110,52 @@ def detect_quarter(image_bgr: np.ndarray, debug: bool = False) -> float | None:
         return None, None, None
 
     cx, cy, r = best_circle
+    hough_diameter_px = r * 2
 
     # ── Ellipse fitting for angle detection ──
-    # Extract the quarter region and find its contour for ellipse fitting
-    quarter_mask = np.zeros_like(gray)
-    cv2.circle(quarter_mask, (cx, cy), int(r * 1.1), 255, -1)  # slightly larger than detected
-    
-    # Threshold the quarter region for a tighter contour
-    quarter_region = cv2.bitwise_and(gray, gray, mask=quarter_mask)
-    # The quarter is bright (silver) — threshold at brightness midpoint
-    _, quarter_thresh = cv2.threshold(quarter_region, 120, 255, cv2.THRESH_BINARY)
-    contours, _ = cv2.findContours(quarter_thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    # Use edge detection (Canny) instead of brightness thresholding,
+    # because the quarter's engraved features confuse simple thresholding.
     
     aspect_ratio = 1.0  # default: perfect circle
-    effective_diameter_px = r * 2  # default: use Hough radius
+    effective_diameter_px = hough_diameter_px  # default: trust Hough
+    
+    # Create a tight mask around the detected quarter edge (annular ring)
+    inner_mask = np.zeros_like(gray)
+    outer_mask = np.zeros_like(gray)
+    cv2.circle(outer_mask, (cx, cy), int(r * 1.15), 255, -1)
+    cv2.circle(inner_mask, (cx, cy), int(r * 0.85), 255, -1)
+    edge_ring = cv2.subtract(outer_mask, inner_mask)
+    
+    # Apply Canny edge detection within the ring
+    quarter_region = cv2.bitwise_and(blurred, blurred, mask=edge_ring)
+    edges = cv2.Canny(quarter_region, 50, 150)
+    
+    # Find contours from edge map
+    contours, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     
     if contours:
-        # Use the largest contour (should be the quarter)
-        cnt = max(contours, key=cv2.contourArea)
-        if len(cnt) >= 5:  # fitEllipse requires at least 5 points
-            ellipse = cv2.fitEllipse(cnt)
+        # Merge all edge points into one contour for ellipse fitting
+        all_points = np.vstack(contours)
+        if len(all_points) >= 5:
+            ellipse = cv2.fitEllipse(all_points)
             major_axis = max(ellipse[1])
             minor_axis = min(ellipse[1])
             if major_axis > 0:
-                aspect_ratio = minor_axis / major_axis
-                # Use MAJOR axis for calibration — it's the uncompressed dimension
-                # (the true diameter, unaffected by camera tilt)
-                effective_diameter_px = major_axis
-                print(f"[Quarter] Ellipse: major={major_axis:.1f}px, minor={minor_axis:.1f}px, "
-                      f"aspect_ratio={aspect_ratio:.3f}")
+                raw_aspect_ratio = minor_axis / major_axis
+                
+                # Sanity check: ellipse major axis should be close to Hough diameter
+                # If they disagree by >20%, the contour is unreliable — trust Hough
+                hough_agreement = min(major_axis, hough_diameter_px) / max(major_axis, hough_diameter_px)
+                
+                if hough_agreement > 0.80:
+                    aspect_ratio = raw_aspect_ratio
+                    effective_diameter_px = major_axis
+                    print(f"[Quarter] Ellipse: major={major_axis:.1f}px, minor={minor_axis:.1f}px, "
+                          f"aspect_ratio={aspect_ratio:.3f} (Hough agreement: {hough_agreement:.2f})")
+                else:
+                    print(f"[Quarter] Ellipse unreliable (major={major_axis:.1f}px vs Hough={hough_diameter_px}px, "
+                          f"agreement={hough_agreement:.2f}). Using Hough circle.")
+                    aspect_ratio = 1.0  # assume no tilt
     
     px_per_mm = effective_diameter_px / QUARTER_DIAMETER_MM
 
