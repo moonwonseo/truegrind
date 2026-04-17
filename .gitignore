@@ -26,3 +26,5 @@ grind_model/
 
 # Node
 node_modules/
+coffee-grounds-dataset-3/
+*.save
