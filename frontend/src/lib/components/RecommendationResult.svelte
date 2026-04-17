@@ -116,6 +116,21 @@
     </div>
   {/if}
 
+  <!-- LLM-Enhanced Insight -->
+  {#if result.llm_enhanced && result.llm_message}
+    <div class="p-4 bg-gradient-to-br from-purple-50 to-indigo-50 border border-purple-200 rounded-xl">
+      <div class="flex items-start gap-2">
+        <div class="w-6 h-6 rounded-full bg-purple-100 flex items-center justify-center flex-shrink-0 mt-0.5">
+          <span class="text-sm">✨</span>
+        </div>
+        <div>
+          <h5 class="text-sm font-semibold text-purple-900">AI Barista Insight</h5>
+          <p class="text-sm text-purple-800 mt-1 leading-relaxed">{result.llm_message}</p>
+        </div>
+      </div>
+    </div>
+  {/if}
+
   <!-- Brew Variable Issues -->
   {#if brew && brew.issues && brew.issues.length > 0}
     <div class="p-4 bg-yellow-50 border border-yellow-200 rounded-xl space-y-2">

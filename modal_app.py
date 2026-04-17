@@ -34,6 +34,7 @@ image = (
         "python-multipart",
         "Pillow",
         "pillow-heif",
+        "google-generativeai",
     )
     .add_local_dir(".", remote_path="/root", ignore=[".venv", "__pycache__", ".git", "runs", "data", "ds", "models", ".DS_Store", "frontend", "node_modules", "*.md"])
 )
@@ -46,7 +47,7 @@ app = modal.App("truegrind-api", image=image)
 #   R2_ACCESS_KEY_ID=... R2_SECRET_ACCESS_KEY=... \
 #   R2_ACCOUNT_ID=... R2_BUCKET_NAME=truegrind \
 #   R2_MODEL_PREFIX=models/models MODEL_PATH=best.pt
-secrets = [modal.Secret.from_name("truegrind-secrets")]
+secrets = [modal.Secret.from_name("truegrind-secrets"), modal.Secret.from_name("gemini-key")]
 
 # ── Volume: cache the model weights so we don't re-download every cold start
 volume = modal.Volume.from_name("truegrind-model-cache", create_if_missing=True)

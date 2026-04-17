@@ -556,6 +556,127 @@ def get_recommendation(req: RecommendRequest):
         raise HTTPException(status_code=500, detail=f"Recommendation failed: {str(e)}")
 
 
+# ─── LLM-Enhanced Recommendation ────────────────────────────
+
+def _get_gemini_model():
+    """Lazy-init Gemini client."""
+    api_key = os.environ.get("GEMINI_API_KEY")
+    if not api_key:
+        return None
+    try:
+        import google.generativeai as genai
+        genai.configure(api_key=api_key)
+        return genai.GenerativeModel("gemini-2.0-flash")
+    except Exception as e:
+        print(f"[LLM] Failed to init Gemini: {e}")
+        return None
+
+
+@app.post("/api/recommend-llm")
+def get_llm_recommendation(req: RecommendRequest):
+    """
+    Enhanced recommendation using Gemini LLM.
+    First runs the rule-based engine, then passes the result to Gemini
+    for a more conversational, personalized response.
+    """
+    # Step 1: Run rule-based recommendation (same as /api/recommend)
+    if req.taste_tags:
+        tags = req.taste_tags
+    elif req.taste_notes:
+        tags = parse_taste_notes(req.taste_notes, use_llm=True)
+    else:
+        tags = []
+
+    payload: Dict[str, Any] = {
+        "current_d50": req.current_d50,
+        "current_setting": req.current_setting,
+        "fitted_slope": req.fitted_slope or FELLOW_ODE_DEFAULTS["fitted_slope"],
+        "dial_range_min": req.dial_range_min or FELLOW_ODE_DEFAULTS["dial_range_min"],
+        "dial_range_max": req.dial_range_max or FELLOW_ODE_DEFAULTS["dial_range_max"],
+        "taste_feedback": tags,
+        "brew_method": req.brew_method,
+    }
+    if req.water_temp_c is not None:
+        payload["water_temp_c"] = req.water_temp_c
+    if req.extraction_time_s is not None:
+        payload["extraction_time_s"] = req.extraction_time_s
+    if req.filter_type is not None:
+        payload["filter_type"] = req.filter_type
+    if req.dose_g is not None:
+        payload["dose_g"] = req.dose_g
+    if req.water_g is not None:
+        payload["water_g"] = req.water_g
+    if req.num_pours is not None:
+        payload["num_pours"] = req.num_pours
+
+    try:
+        rule_result = recommend_filter(payload)
+    except Exception as e:
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Recommendation failed: {str(e)}")
+
+    # Step 2: Enhance with Gemini
+    model = _get_gemini_model()
+    if model is None:
+        # No API key — return rule-based only
+        rule_result["parsed_tags"] = tags
+        rule_result["llm_enhanced"] = False
+        return {"success": True, "recommendation": rule_result}
+
+    # Build context for the LLM
+    brew_method_label = req.brew_method.replace("_", " ").title()
+    taste_desc = ", ".join(tags) if tags else "no specific taste notes"
+
+    brew_details = []
+    if req.water_temp_c:
+        brew_details.append(f"water temp: {req.water_temp_c}°C")
+    if req.extraction_time_s:
+        m, s = divmod(int(req.extraction_time_s), 60)
+        brew_details.append(f"brew time: {m}:{s:02d}")
+    if req.dose_g:
+        brew_details.append(f"dose: {req.dose_g}g")
+    if req.water_g:
+        brew_details.append(f"water: {req.water_g}g")
+    if req.filter_type:
+        brew_details.append(f"{req.filter_type} filter")
+    brew_str = ", ".join(brew_details) if brew_details else "no brew details provided"
+
+    prompt = f"""You are a specialty coffee expert and barista coach. A user just analyzed their coffee grounds with TrueGrind and is asking for advice.
+
+Here's what we know:
+- Brew method: {brew_method_label}
+- Current grind D50: {req.current_d50}µm (median particle size)
+- Grinder setting: {req.current_setting}
+- Taste feedback: {taste_desc}
+- Brew variables: {brew_str}
+- Rule-based recommendation: {rule_result.get('message', 'No recommendation available')}
+- Suggested grind adjustment: {rule_result.get('suggested_setting', 'none')}
+
+Give a helpful, concise recommendation (3-5 sentences max). Be specific and actionable.
+- Reference their actual D50 number and what it means for their brew method
+- If the taste feedback suggests under/over extraction, explain WHY that grind size causes it
+- If they provided brew variables, comment on whether those are in the ideal range
+- End with one specific thing to try on their next brew
+- Be conversational but authoritative, like a knowledgeable friend at a coffee shop
+- Do NOT use markdown formatting, bullet points, or headers — just plain conversational text"""
+
+    try:
+        response = model.generate_content(prompt)
+        llm_message = response.text.strip()
+
+        rule_result["parsed_tags"] = tags
+        rule_result["llm_enhanced"] = True
+        rule_result["llm_message"] = llm_message
+        return {"success": True, "recommendation": rule_result}
+
+    except Exception as e:
+        print(f"[LLM] Gemini call failed: {e}")
+        # Fallback to rule-based
+        rule_result["parsed_tags"] = tags
+        rule_result["llm_enhanced"] = False
+        return {"success": True, "recommendation": rule_result}
+
+
 # ─── Entry point ─────────────────────────────────────────────
 
 def run():

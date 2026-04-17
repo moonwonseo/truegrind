@@ -6,7 +6,7 @@
   import GrindSizeGuide from '$lib/components/GrindSizeGuide.svelte';
   import CameraViewfinder from '$lib/components/CameraViewfinder.svelte';
   import { Camera, Upload, Info, ChevronRight, AlertCircle, Wifi, WifiOff, ChevronDown } from 'lucide-svelte';
-  import { analyzePhoto, getRecommendation, checkHealth, preflightCheck } from '$lib/api';
+  import { analyzePhoto, getRecommendation, getLLMRecommendation, checkHealth, preflightCheck } from '$lib/api';
   import type { PsdResult, AnalyzeResponse, RecommendationResult as RecResult, PreflightResult } from '$lib/api';
 
   // ── State ─────────────────────────────────────────────
@@ -312,7 +312,7 @@
     errorMessage = null;
     lastFeedback = payload;  // Store for journal saving
     try {
-      const result = await getRecommendation(payload);
+      const result = await getLLMRecommendation(payload);
       recommendation = result.recommendation;
       step = 'recommendation';
     } catch (err: any) {

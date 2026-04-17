@@ -94,6 +94,8 @@ export interface RecommendationResult {
     secondary: string;
   };
   parsed_tags: string[];
+  llm_enhanced?: boolean;
+  llm_message?: string;
 }
 
 export interface RecommendResponse {
@@ -155,6 +157,24 @@ export async function getRecommendation(payload: RecommendPayload): Promise<Reco
   if (!resp.ok) {
     const err = await resp.json().catch(() => ({ detail: 'Unknown error' }));
     throw new Error(err.detail || `Recommendation failed (${resp.status})`);
+  }
+
+  return resp.json();
+}
+
+/**
+ * Get LLM-enhanced grind recommendation (falls back to rule-based).
+ */
+export async function getLLMRecommendation(payload: RecommendPayload): Promise<RecommendResponse> {
+  const resp = await fetch(`${API_BASE}/recommend-llm`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+
+  if (!resp.ok) {
+    // Fallback to rule-based if LLM endpoint fails
+    return getRecommendation(payload);
   }
 
   return resp.json();
