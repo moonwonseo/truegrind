@@ -56,19 +56,19 @@
     { label: 'Pour Over', items: [
       { value: 'pour_over', label: 'V60' },
       { value: 'chemex', label: 'Chemex' },
-      { value: 'pour_over', label: 'Kalita Wave' },
-      { value: 'pour_over', label: 'Hario Switch' },
-      { value: 'pour_over', label: 'Pour Over (Other)' },
+      { value: 'kalita_wave', label: 'Kalita Wave' },
+      { value: 'hario_switch', label: 'Hario Switch' },
     ]},
     { label: 'Immersion', items: [
       { value: 'french_press', label: 'French Press' },
       { value: 'aeropress', label: 'AeroPress' },
-      { value: 'aeropress', label: 'AeroPress (Inverted)' },
+      { value: 'aeropress_inverted', label: 'AeroPress (Inverted)' },
       { value: 'cold_brew', label: 'Cold Brew' },
     ]},
     { label: 'Pressure', items: [
       { value: 'espresso', label: 'Espresso' },
       { value: 'moka_pot', label: 'Moka Pot' },
+      { value: 'drip', label: 'Drip Machine' },
     ]},
   ];
 

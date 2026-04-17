@@ -56,7 +56,31 @@
       "ideal_extraction_time_s": [180, 270],
       "ideal_ratio": [15, 17],
       "filter_types": ["paper", "cloth"],
-      "description": "Pour-over (V60, Chemex, Kalita, etc.)"
+      "description": "Pour-over (V60)"
+    },
+    "chemex": {
+      "target_d50_um": 650,
+      "ideal_temp_c": [92, 96],
+      "ideal_extraction_time_s": [210, 300],
+      "ideal_ratio": [15, 17],
+      "filter_types": ["paper"],
+      "description": "Chemex (coarser than V60 due to thick filter)"
+    },
+    "kalita_wave": {
+      "target_d50_um": 600,
+      "ideal_temp_c": [92, 96],
+      "ideal_extraction_time_s": [180, 270],
+      "ideal_ratio": [15, 17],
+      "filter_types": ["paper"],
+      "description": "Kalita Wave flat-bed dripper"
+    },
+    "hario_switch": {
+      "target_d50_um": 550,
+      "ideal_temp_c": [90, 96],
+      "ideal_extraction_time_s": [150, 240],
+      "ideal_ratio": [14, 17],
+      "filter_types": ["paper"],
+      "description": "Hario Switch (hybrid immersion/percolation)"
     },
     "french_press": {
       "target_d50_um": 800,
@@ -72,7 +96,31 @@
       "ideal_extraction_time_s": [60, 180],
       "ideal_ratio": [12, 17],
       "filter_types": ["paper", "metal"],
-      "description": "AeroPress (versatile range)"
+      "description": "AeroPress (standard)"
+    },
+    "aeropress_inverted": {
+      "target_d50_um": 500,
+      "ideal_temp_c": [80, 96],
+      "ideal_extraction_time_s": [90, 180],
+      "ideal_ratio": [12, 16],
+      "filter_types": ["paper", "metal"],
+      "description": "AeroPress (inverted)"
+    },
+    "espresso": {
+      "target_d50_um": 300,
+      "ideal_temp_c": [90, 96],
+      "ideal_extraction_time_s": [25, 35],
+      "ideal_ratio": [1.5, 2.5],
+      "filter_types": ["metal"],
+      "description": "Espresso"
+    },
+    "cold_brew": {
+      "target_d50_um": 900,
+      "ideal_temp_c": [2, 24],
+      "ideal_extraction_time_s": [43200, 86400],
+      "ideal_ratio": [5, 8],
+      "filter_types": ["paper", "metal", "cloth"],
+      "description": "Cold brew (12-24hr steep)"
     },
     "drip": {
       "target_d50_um": 650,

@@ -88,9 +88,54 @@
   let qualityWarnings = $state<QualityWarning[]>([]);
   let showWarningModal = $state(false);
 
+  // Coffee trivia for the analyzing wait screen
+  const COFFEE_TRIVIA = [
+    { type: 'fact', text: 'Coffee is the second most traded commodity in the world, after crude oil.' },
+    { type: 'fact', text: 'A single coffee tree produces about 1 pound of roasted coffee per year.' },
+    { type: 'fact', text: 'The word "espresso" means "pressed out" in Italian — referring to water forced through the grounds.' },
+    { type: 'fact', text: 'Finland consumes the most coffee per capita — about 12 kg per person per year.' },
+    { type: 'fact', text: 'Coffee beans are actually the pits of a cherry-like fruit called a "coffee cherry."' },
+    { type: 'fact', text: 'Lighter roasts have more caffeine than dark roasts — roasting burns off caffeine.' },
+    { type: 'fact', text: 'The ideal water temperature for brewing is 92–96°C (197–205°F) — just below boiling.' },
+    { type: 'fact', text: 'D50 means the diameter where 50% of particles are smaller — it\'s the "median" grind size.' },
+    { type: 'fact', text: 'A US quarter is exactly 24.26mm in diameter — that\'s how TrueGrind calibrates your photo.' },
+    { type: 'quiz', question: 'Which grind size is coarser?', options: ['Espresso', 'French Press'], answer: 1 },
+    { type: 'fact', text: 'James Hoffmann\'s V60 technique calls for a 15:1 ratio and a 3:30 total brew time.' },
+    { type: 'fact', text: 'Fines (<200µm) over-extract quickly and add bitterness. Boulders (>1200µm) under-extract.' },
+    { type: 'quiz', question: 'What does a sour-tasting brew usually mean?', options: ['Over-extracted (grind finer)', 'Under-extracted (grind finer)'], answer: 1 },
+    { type: 'fact', text: 'The "bloom" pour releases CO₂ trapped during roasting — fresh beans bloom more.' },
+    { type: 'fact', text: 'A uniform grind distribution is just as important as the D50 for a balanced cup.' },
+    { type: 'quiz', question: 'Which brew method uses the finest grind?', options: ['Chemex', 'Espresso', 'French Press'], answer: 1 },
+    { type: 'fact', text: 'The Moka Pot was invented by Alfonso Bialetti in Italy in 1933.' },
+    { type: 'fact', text: 'Cold brew uses coarse grounds steeped 12–24 hours — time replaces heat for extraction.' },
+  ];
+  let triviaIndex = $state(0);
+  let triviaFade = $state(true);
+  let triviaInterval: ReturnType<typeof setInterval> | null = null;
+  let quizAnswer = $state<number | null>(null);
+
+  function startTrivia() {
+    triviaIndex = Math.floor(Math.random() * COFFEE_TRIVIA.length);
+    triviaFade = true;
+    quizAnswer = null;
+    triviaInterval = setInterval(() => {
+      triviaFade = false;
+      setTimeout(() => {
+        triviaIndex = (triviaIndex + 1) % COFFEE_TRIVIA.length;
+        quizAnswer = null;
+        triviaFade = true;
+      }, 300);
+    }, 6000);
+  }
+
+  function stopTrivia() {
+    if (triviaInterval) { clearInterval(triviaInterval); triviaInterval = null; }
+  }
+
   async function analyzeGrind() {
     if (!uploadedFile) return;
     step = 'analyzing';
+    startTrivia();
     errorMessage = null;
     qualityWarnings = [];
 
@@ -112,6 +157,7 @@
         showWarningModal = true;
       }
 
+      stopTrivia();
       step = 'results';
     } catch (err: any) {
       errorMessage = err.message || 'Analysis failed';
@@ -126,6 +172,7 @@
         }];
       }
       showWarningModal = true;
+      stopTrivia();
       step = 'upload';
     }
   }
@@ -152,10 +199,11 @@
   const JOURNAL_KEY = 'truegrind-journal';
 
   const BREW_METHOD_LABELS: Record<string, string> = {
-    pour_over: 'Pour Over', french_press: 'French Press',
+    pour_over: 'V60', french_press: 'French Press',
     aeropress: 'AeroPress', drip: 'Drip Machine', moka_pot: 'Moka Pot',
     espresso: 'Espresso', chemex: 'Chemex', cold_brew: 'Cold Brew',
-    hario_switch: 'Hario Switch', aeropress_inverted: 'AeroPress (Inverted)',
+    hario_switch: 'Hario Switch', kalita_wave: 'Kalita Wave',
+    aeropress_inverted: 'AeroPress (Inverted)',
   };
 
   function formatBrewTime(seconds: number | undefined): string {
@@ -323,14 +371,13 @@
                 <optgroup label="Pour Over">
                   <option value="pour_over">V60</option>
                   <option value="chemex">Chemex</option>
-                  <option value="pour_over">Kalita Wave</option>
-                  <option value="pour_over">Hario Switch</option>
-                  <option value="pour_over">Pour Over (Other)</option>
+                  <option value="kalita_wave">Kalita Wave</option>
+                  <option value="hario_switch">Hario Switch</option>
                 </optgroup>
                 <optgroup label="Immersion">
                   <option value="french_press">French Press</option>
                   <option value="aeropress">AeroPress</option>
-                  <option value="aeropress">AeroPress (Inverted)</option>
+                  <option value="aeropress_inverted">AeroPress (Inverted)</option>
                   <option value="cold_brew">Cold Brew</option>
                 </optgroup>
                 <optgroup label="Pressure">
@@ -458,6 +505,46 @@
           <div>
             <p class="text-neutral-800 font-medium">Analyzing your grind<span class="analyzing-dots"></span></p>
             <p class="text-sm text-neutral-500 mt-1">Detecting particles and measuring sizes</p>
+          </div>
+
+          <!-- Coffee Trivia -->
+          <div class="mt-6 pt-4 border-t border-neutral-100">
+            <div class="transition-opacity duration-300 {triviaFade ? 'opacity-100' : 'opacity-0'}">
+              {#if COFFEE_TRIVIA[triviaIndex].type === 'fact'}
+                <div class="flex items-start gap-2 text-left px-2">
+                  <span class="text-amber-600 text-lg flex-shrink-0">☕</span>
+                  <p class="text-sm text-neutral-600 italic">{COFFEE_TRIVIA[triviaIndex].text}</p>
+                </div>
+              {:else}
+                <div class="text-left px-2 space-y-2">
+                  <p class="text-sm font-medium text-amber-900">🧠 Quick Quiz</p>
+                  <p class="text-sm text-neutral-700">{COFFEE_TRIVIA[triviaIndex].question}</p>
+                  <div class="flex flex-wrap gap-2">
+                    {#each COFFEE_TRIVIA[triviaIndex].options || [] as opt, i}
+                      <button
+                        onclick={() => quizAnswer = i}
+                        disabled={quizAnswer !== null}
+                        class="px-3 py-1.5 text-xs rounded-full border transition-all
+                          {quizAnswer === null ? 'bg-amber-50 border-amber-200 text-amber-800 hover:bg-amber-100' :
+                           i === COFFEE_TRIVIA[triviaIndex].answer ? 'bg-green-100 border-green-300 text-green-800' :
+                           quizAnswer === i ? 'bg-red-100 border-red-300 text-red-800' :
+                           'bg-neutral-100 border-neutral-200 text-neutral-500'}"
+                      >{opt}</button>
+                    {/each}
+                  </div>
+                  {#if quizAnswer !== null}
+                    <p class="text-xs {quizAnswer === COFFEE_TRIVIA[triviaIndex].answer ? 'text-green-600' : 'text-red-500'}">
+                      {quizAnswer === COFFEE_TRIVIA[triviaIndex].answer ? '✓ Correct!' : '✗ Not quite!'}
+                    </p>
+                  {/if}
+                </div>
+              {/if}
+            </div>
+            <div class="flex justify-center gap-1 mt-3">
+              {#each Array(Math.min(COFFEE_TRIVIA.length, 5)) as _, i}
+                <div class="w-1.5 h-1.5 rounded-full transition-colors {i === triviaIndex % 5 ? 'bg-amber-500' : 'bg-neutral-200'}"></div>
+              {/each}
+            </div>
           </div>
         </div>
       </div>
