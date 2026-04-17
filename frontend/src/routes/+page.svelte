@@ -252,6 +252,16 @@
     }, 300);
   }
 
+  function handleQuizAnswer(index: number) {
+    if (quizAnswer !== null) return;
+    quizAnswer = index;
+    setTimeout(() => {
+      if (quizAnswer === index) {
+        nextTrivia();
+      }
+    }, 1500);
+  }
+
   function stopTrivia() {
     // No-op now that it's click-based
   }
@@ -600,8 +610,8 @@
 
     <!-- Step 2: Analyzing -->
     {#if step === 'analyzing'}
-      <div class="p-8 bg-white border border-neutral-200 rounded-xl">
-        <div class="space-y-4 text-center">
+      <div class="p-8 bg-white border border-neutral-200 rounded-xl min-h-[500px] flex flex-col">
+        <div class="space-y-4 text-center mt-2">
           <div class="flex justify-center">
             <svg width="80" height="100" viewBox="0 0 80 100" fill="none" xmlns="http://www.w3.org/2000/svg">
               <!-- Grinder body -->
@@ -632,8 +642,8 @@
           </div>
 
           <!-- Coffee Trivia -->
-          <div class="mt-6 pt-4 border-t border-neutral-100">
-            <div class="transition-opacity duration-300 {triviaFade ? 'opacity-100' : 'opacity-0'}">
+          <div class="mt-8 pt-4 border-t border-neutral-100 flex-1 flex flex-col justify-end">
+            <div class="transition-opacity duration-300 {triviaFade ? 'opacity-100' : 'opacity-0'} min-h-[140px] flex flex-col justify-center">
               {#if COFFEE_TRIVIA[triviaIndex].type === 'fact'}
                 <div class="flex items-start gap-2 text-left px-2">
                   <span class="text-amber-600 text-lg flex-shrink-0">☕</span>
@@ -646,7 +656,7 @@
                   <div class="flex flex-wrap gap-2">
                     {#each COFFEE_TRIVIA[triviaIndex].options || [] as opt, i}
                       <button
-                        onclick={() => quizAnswer = i}
+                        onclick={() => handleQuizAnswer(i)}
                         disabled={quizAnswer !== null}
                         class="px-3 py-1.5 text-xs rounded-full border transition-all
                           {quizAnswer === null ? 'bg-amber-50 border-amber-200 text-amber-800 hover:bg-amber-100' :
