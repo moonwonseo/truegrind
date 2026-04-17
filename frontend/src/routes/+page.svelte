@@ -230,7 +230,6 @@
   ];
   let triviaIndex = $state(0);
   let triviaFade = $state(true);
-  let triviaInterval: ReturnType<typeof setInterval> | null = null;
   let quizAnswer = $state<number | null>(null);
 
   function startTrivia() {
@@ -242,18 +241,19 @@
     triviaIndex = 0;
     triviaFade = true;
     quizAnswer = null;
-    triviaInterval = setInterval(() => {
-      triviaFade = false;
-      setTimeout(() => {
-        triviaIndex = (triviaIndex + 1) % COFFEE_TRIVIA.length;
-        quizAnswer = null;
-        triviaFade = true;
-      }, 300);
-    }, 6000);
+  }
+
+  function nextTrivia() {
+    triviaFade = false;
+    setTimeout(() => {
+      triviaIndex = (triviaIndex + 1) % COFFEE_TRIVIA.length;
+      quizAnswer = null;
+      triviaFade = true;
+    }, 300);
   }
 
   function stopTrivia() {
-    if (triviaInterval) { clearInterval(triviaInterval); triviaInterval = null; }
+    // No-op now that it's click-based
   }
 
   async function analyzeGrind() {
@@ -664,10 +664,13 @@
                 </div>
               {/if}
             </div>
-            <div class="flex justify-center gap-1 mt-3">
-              {#each Array(Math.min(COFFEE_TRIVIA.length, 5)) as _, i}
-                <div class="w-1.5 h-1.5 rounded-full transition-colors {i === triviaIndex % 5 ? 'bg-amber-500' : 'bg-neutral-200'}"></div>
-              {/each}
+            <div class="flex justify-center mt-3">
+              <button 
+                onclick={nextTrivia}
+                class="px-4 py-1.5 text-xs font-medium text-amber-700 bg-amber-50 hover:bg-amber-100 border border-amber-200 rounded-full transition-colors flex items-center gap-1"
+              >
+                Next <ChevronRight class="w-3 h-3" />
+              </button>
             </div>
           </div>
         </div>
