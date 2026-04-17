@@ -88,26 +88,145 @@
   let qualityWarnings = $state<QualityWarning[]>([]);
   let showWarningModal = $state(false);
 
-  // Coffee trivia for the analyzing wait screen
-  const COFFEE_TRIVIA = [
-    { type: 'fact', text: 'Coffee is the second most traded commodity in the world, after crude oil.' },
-    { type: 'fact', text: 'A single coffee tree produces about 1 pound of roasted coffee per year.' },
-    { type: 'fact', text: 'The word "espresso" means "pressed out" in Italian — referring to water forced through the grounds.' },
-    { type: 'fact', text: 'Finland consumes the most coffee per capita — about 12 kg per person per year.' },
-    { type: 'fact', text: 'Coffee beans are actually the pits of a cherry-like fruit called a "coffee cherry."' },
+  // Coffee trivia for the analyzing wait screen (~126 items)
+  const COFFEE_TRIVIA: Array<{type: string; text?: string; question?: string; options?: string[]; answer?: number}> = [
+    // ── Origins & History ──
+    { type: 'fact', text: 'Coffee was discovered in Ethiopia around the 9th century — legend says a goat herder noticed his goats dancing after eating coffee cherries.' },
+    { type: 'fact', text: 'The word "coffee" comes from the Arabic "qahwa," which became "kahve" in Turkish and "koffie" in Dutch.' },
+    { type: 'fact', text: 'The first coffeehouse opened in Constantinople (Istanbul) in 1475.' },
+    { type: 'fact', text: 'Coffee was banned in Mecca in 1511 because leaders believed it stimulated radical thinking.' },
+    { type: 'fact', text: 'Brazil has been the world\'s largest coffee producer for over 150 years.' },
+    { type: 'fact', text: 'The Boston Tea Party of 1773 made coffee the patriotic drink of choice in America.' },
+    { type: 'fact', text: 'Italy\'s first coffee house opened in Venice in 1629 — espresso came much later in 1906.' },
+    { type: 'fact', text: 'The Moka Pot was invented by Alfonso Bialetti in Italy in 1933.' },
+    { type: 'fact', text: 'Instant coffee was invented by Satori Kato, a Japanese-American chemist, in 1901.' },
+    { type: 'fact', text: 'The AeroPress was invented by Alan Adler — the same person who invented the Aerobie frisbee.' },
+    { type: 'fact', text: 'Kaldi, the Ethiopian goat herder, is considered the legendary discoverer of coffee — around 850 AD.' },
+    { type: 'fact', text: 'Coffee spread from Ethiopia to Yemen, where Sufi monks used it for late-night prayers.' },
+    { type: 'fact', text: 'European coffeehouses in the 1600s were called "penny universities" — a penny bought a cup and access to intellectual conversation.' },
+
+    // ── Science & Chemistry ──
+    { type: 'fact', text: 'A coffee bean contains over 1,000 chemical compounds — more complex than wine.' },
+    { type: 'fact', text: 'Caffeine is a natural insecticide — coffee plants evolved it to ward off pests.' },
+    { type: 'fact', text: 'The Maillard reaction during roasting creates the brown color and complex flavors in coffee.' },
+    { type: 'fact', text: 'Coffee extracts fastest in the first 30 seconds — that\'s why espresso shots are so short.' },
+    { type: 'fact', text: 'Water makes up 98.5% of brewed coffee — water quality dramatically affects taste.' },
     { type: 'fact', text: 'Lighter roasts have more caffeine than dark roasts — roasting burns off caffeine.' },
     { type: 'fact', text: 'The ideal water temperature for brewing is 92–96°C (197–205°F) — just below boiling.' },
+    { type: 'fact', text: 'Coffee grounds are about 28% soluble — the rest is cellulose fiber that stays in the filter.' },
+    { type: 'fact', text: 'Chlorogenic acids in coffee break down during roasting, producing the acidity in lighter roasts.' },
+    { type: 'fact', text: 'CO₂ produced during roasting can take 2–14 days to fully degas from whole beans.' },
+    { type: 'fact', text: 'The "ideal" extraction yield is 18–22% — below is sour (under-extracted), above is bitter (over-extracted).' },
+    { type: 'fact', text: 'Arabica coffee has 44 chromosomes — twice as many as Robusta\'s 22.' },
+    { type: 'fact', text: 'A single espresso shot contains about 63mg of caffeine, while a standard drip cup has ~95mg.' },
+
+    // ── Grind Science ──
     { type: 'fact', text: 'D50 means the diameter where 50% of particles are smaller — it\'s the "median" grind size.' },
     { type: 'fact', text: 'A US quarter is exactly 24.26mm in diameter — that\'s how TrueGrind calibrates your photo.' },
-    { type: 'quiz', question: 'Which grind size is coarser?', options: ['Espresso', 'French Press'], answer: 1 },
-    { type: 'fact', text: 'James Hoffmann\'s V60 technique calls for a 15:1 ratio and a 3:30 total brew time.' },
     { type: 'fact', text: 'Fines (<200µm) over-extract quickly and add bitterness. Boulders (>1200µm) under-extract.' },
-    { type: 'quiz', question: 'What does a sour-tasting brew usually mean?', options: ['Over-extracted (grind finer)', 'Under-extracted (grind finer)'], answer: 1 },
-    { type: 'fact', text: 'The "bloom" pour releases CO₂ trapped during roasting — fresh beans bloom more.' },
     { type: 'fact', text: 'A uniform grind distribution is just as important as the D50 for a balanced cup.' },
-    { type: 'quiz', question: 'Which brew method uses the finest grind?', options: ['Chemex', 'Espresso', 'French Press'], answer: 1 },
-    { type: 'fact', text: 'The Moka Pot was invented by Alfonso Bialetti in Italy in 1933.' },
+    { type: 'fact', text: 'Burr grinders produce more uniform particles than blade grinders — blade grinders create lots of fines and boulders.' },
+    { type: 'fact', text: 'Conical burrs tend to produce a bimodal distribution (two peaks), while flat burrs produce a more unimodal (single peak) distribution.' },
+    { type: 'fact', text: 'Espresso grind is about 200–300µm — roughly the texture of powdered sugar.' },
+    { type: 'fact', text: 'French press grind is about 800–1000µm — roughly the texture of coarse sea salt.' },
+    { type: 'fact', text: 'Static cling causes fine particles to stick to the burrs — that\'s why some grinders have anti-static features.' },
+    { type: 'fact', text: 'RDT (Ross Droplet Technique) adds a tiny spray of water to beans before grinding to reduce static and fines.' },
+    { type: 'fact', text: 'Grind retention is coffee that stays trapped inside the grinder — single-dosing helps minimize it.' },
+    { type: 'fact', text: 'The Weber EG-1 grinder has 83mm flat burrs — one of the largest in home grinders.' },
+    { type: 'fact', text: 'Popcorning happens when beans bounce around in the hopper instead of feeding into the burrs — single-dosing eliminates this.' },
+    { type: 'fact', text: 'Sieve analysis is the industry standard for measuring grind distribution — TrueGrind gives you a digital alternative.' },
+
+    // ── Brew Methods ──
+    { type: 'fact', text: 'The V60 was designed by Hario in 2005 — the 60° angle of the cone gives it its name.' },
+    { type: 'fact', text: 'James Hoffmann\'s V60 technique calls for a 15:1 ratio and a 3:30 total brew time.' },
+    { type: 'fact', text: 'The Chemex was invented in 1941 by Peter Schlumbohm, a German chemist.' },
+    { type: 'fact', text: 'Chemex filters are 20–30% thicker than standard paper filters — they remove more oils and fines.' },
+    { type: 'fact', text: 'The Hario Switch combines pour-over and immersion — you start with a sealed valve for steeping, then open it for percolation.' },
+    { type: 'fact', text: 'French press was patented by Italian designer Attilio Calimani in 1929 — not a French person.' },
+    { type: 'fact', text: 'Cold brew concentrates can have 2–3x more caffeine per ounce than hot-brewed coffee.' },
+    { type: 'fact', text: 'The AeroPress Championship has been held annually since 2008 — competitors tweak every variable for the perfect cup.' },
+    { type: 'fact', text: 'Espresso machines generate about 9 bars of pressure — that\'s 130 PSI forcing water through the puck.' },
+    { type: 'fact', text: 'The Kalita Wave uses a flat-bottom bed — this promotes more even extraction than conical drippers.' },
+    { type: 'fact', text: 'Turkish coffee uses the finest grind of any method — almost powder — and is boiled directly in a cezve.' },
+    { type: 'fact', text: 'Siphon (vacuum) brewers heat water in a lower chamber, forcing it up into the grounds — cooling creates a vacuum to pull the brew back down.' },
+    { type: 'fact', text: 'The "bypass" technique adds hot water after brewing to adjust strength without changing extraction.' },
+    { type: 'fact', text: 'Pour-over typically uses a 1:15 to 1:17 coffee-to-water ratio.' },
+
+    // ── Roasting ──
+    { type: 'fact', text: 'Coffee beans expand 50–100% in volume during roasting but lose about 15–20% of their weight.' },
+    { type: 'fact', text: 'First crack during roasting happens around 196°C (385°F) — the bean structure fractures and releases steam.' },
+    { type: 'fact', text: 'Second crack happens around 224°C (435°F) — the oils migrate to the surface, creating a shiny dark roast.' },
+    { type: 'fact', text: 'Light roasts (City/City+) preserve more origin character — you can taste where the bean was grown.' },
+    { type: 'fact', text: 'Dark roasts taste more like the roast itself — smoky and bittersweet — while origin flavors fade.' },
+    { type: 'fact', text: 'Green (unroasted) coffee beans can be stored for over a year. Roasted beans are best within 2–4 weeks.' },
+    { type: 'fact', text: 'The term "third wave coffee" was coined in 2002 — it treats coffee as an artisanal product, like wine.' },
+    { type: 'fact', text: 'Omni roasts are designed to taste good in both espresso and filter — a modern trend in specialty roasting.' },
+
+    // ── Origins & Varieties ──
+    { type: 'fact', text: 'There are over 120 species of coffee, but Arabica and Robusta account for 99% of global production.' },
+    { type: 'fact', text: 'Arabica grows best at 1,200–2,200m elevation — higher altitude = denser beans = more complex flavors.' },
+    { type: 'fact', text: 'Robusta has about twice the caffeine of Arabica and is often used in instant coffee and espresso blends.' },
+    { type: 'fact', text: 'Geisha (Gesha) coffee from Panama regularly sells for over $100/lb due to its jasmine-like floral notes.' },
+    { type: 'fact', text: 'Ethiopian natural process coffees are dried with the cherry fruit intact — this adds fruity, wine-like flavors.' },
+    { type: 'fact', text: 'Washed (wet) processing removes the cherry pulp before drying — producing a cleaner, brighter cup.' },
+    { type: 'fact', text: 'Honey process leaves some of the mucilage on the bean during drying — creating a sweet, syrupy body.' },
+    { type: 'fact', text: 'Colombia produces exclusively Arabica coffee and is the third-largest producer worldwide.' },
+    { type: 'fact', text: 'Kona coffee from Hawaii is one of the most expensive in the world due to high labor costs and limited land.' },
+    { type: 'fact', text: 'Vietnam is the world\'s second-largest coffee producer — mostly Robusta, used for Vietnamese iced coffee (cà phê sữa đá).' },
+    { type: 'fact', text: 'Jamaican Blue Mountain coffee is prized for its mild, clean flavor — most of it is exported to Japan.' },
+    { type: 'fact', text: 'The "coffee belt" spans roughly 25°N to 30°S latitude — the tropical zone where coffee grows best.' },
+
+    // ── Business & Culture ──
+    { type: 'fact', text: 'Coffee is the second most traded commodity in the world, after crude oil.' },
+    { type: 'fact', text: 'A single coffee tree produces about 1 pound of roasted coffee per year.' },
+    { type: 'fact', text: 'Finland consumes the most coffee per capita — about 12 kg per person per year.' },
+    { type: 'fact', text: 'Americans consume about 400 million cups of coffee per day.' },
+    { type: 'fact', text: 'The specialty coffee industry is worth over $50 billion globally.' },
+    { type: 'fact', text: 'The word "barista" is Italian for "bartender" — it was adopted by coffee culture in the 1980s.' },
+    { type: 'fact', text: 'Starbucks opens an average of 2 new stores per day worldwide.' },
+    { type: 'fact', text: 'The most expensive coffee in the world is Black Ivory — it costs over $500/lb and is processed through elephants.' },
+    { type: 'fact', text: 'Coffee beans are actually the pits of a cherry-like fruit called a "coffee cherry."' },
+
+    // ── Latte Art & Milk ──
+    { type: 'fact', text: 'Latte art became mainstream in the late 1980s — barista David Schomer pioneered the rosetta pattern.' },
+    { type: 'fact', text: 'Milk steamed to 60–65°C has the best sweetness and texture for latte art.' },
+    { type: 'fact', text: 'Oat milk froths better than most plant milks because of its higher protein and fat content.' },
+    { type: 'fact', text: 'A "flat white" originated in Australia/New Zealand and uses microfoam — less frothy than a latte.' },
+
+    // ── Health ──
+    { type: 'fact', text: 'Moderate coffee consumption (3–5 cups/day) is associated with reduced risk of type 2 diabetes.' },
+    { type: 'fact', text: 'Caffeine blocks adenosine receptors in the brain — that\'s what makes you feel alert.' },
+    { type: 'fact', text: 'Coffee contains antioxidants — it\'s the #1 source of antioxidants in the Western diet.' },
+    { type: 'fact', text: 'Caffeine reaches peak blood levels about 30–60 minutes after consumption.' },
+    { type: 'fact', text: 'The half-life of caffeine is about 5 hours — that\'s why afternoon coffee can affect sleep.' },
+    { type: 'fact', text: 'Decaf coffee still contains about 2–15mg of caffeine per cup.' },
+
+    // ── TrueGrind Specific ──
+    { type: 'fact', text: 'TrueGrind uses a YOLOv8 segmentation model trained on real coffee ground photos to detect individual particles.' },
+    { type: 'fact', text: 'The "bloom" pour releases CO₂ trapped during roasting — fresh beans bloom more.' },
+    { type: 'fact', text: 'The word "espresso" means "pressed out" in Italian — referring to water forced through the grounds.' },
     { type: 'fact', text: 'Cold brew uses coarse grounds steeped 12–24 hours — time replaces heat for extraction.' },
+    { type: 'fact', text: 'A channeling shot occurs when water finds a path of least resistance through the puck — uneven extraction results.' },
+
+    // ── Quizzes (interspersed) ──
+    { type: 'quiz', question: 'Which grind size is coarser?', options: ['Espresso', 'French Press'], answer: 1 },
+    { type: 'quiz', question: 'What does a sour-tasting brew usually mean?', options: ['Over-extracted', 'Under-extracted'], answer: 1 },
+    { type: 'quiz', question: 'Which brew method uses the finest grind?', options: ['Chemex', 'Espresso', 'French Press'], answer: 1 },
+    { type: 'quiz', question: 'What\'s the ideal extraction yield?', options: ['10–14%', '18–22%', '30–35%'], answer: 1 },
+    { type: 'quiz', question: 'Which country consumes the most coffee per capita?', options: ['USA', 'Italy', 'Finland'], answer: 2 },
+    { type: 'quiz', question: 'What temperature should milk be steamed to for latte art?', options: ['50°C', '60–65°C', '80°C'], answer: 1 },
+    { type: 'quiz', question: 'What does RDT stand for in the context of grinding?', options: ['Rapid Dose Technique', 'Ross Droplet Technique', 'Reverse Distribution Test'], answer: 1 },
+    { type: 'quiz', question: 'How many bars of pressure does an espresso machine use?', options: ['3 bars', '9 bars', '15 bars'], answer: 1 },
+    { type: 'quiz', question: 'Which processing method dries coffee with the cherry fruit still on?', options: ['Washed', 'Natural', 'Honey'], answer: 1 },
+    { type: 'quiz', question: 'What is "first crack" in roasting?', options: ['When the bag opens', 'When the bean structure fractures at ~196°C', 'When the roaster door opens'], answer: 1 },
+    { type: 'quiz', question: 'Which has more caffeine?', options: ['Light roast', 'Dark roast'], answer: 0 },
+    { type: 'quiz', question: 'What\'s the coffee-to-water ratio for most pour-overs?', options: ['1:8', '1:15', '1:25'], answer: 1 },
+    { type: 'quiz', question: 'Arabica or Robusta — which has more caffeine?', options: ['Arabica', 'Robusta'], answer: 1 },
+    { type: 'quiz', question: 'What year was the V60 designed?', options: ['1985', '2005', '2015'], answer: 1 },
+    { type: 'quiz', question: 'What is the "coffee belt"?', options: ['A fashion brand', 'The tropical zone where coffee grows (25°N–30°S)', 'A conveyor belt in coffee factories'], answer: 1 },
+    { type: 'quiz', question: 'How long can green (unroasted) coffee beans be stored?', options: ['2 weeks', '3 months', 'Over a year'], answer: 2 },
+    { type: 'quiz', question: 'What makes Geisha coffee special?', options: ['It\'s grown in Japan', 'Its jasmine-like floral notes', 'It has no caffeine'], answer: 1 },
+    { type: 'quiz', question: 'What does "omni roast" mean?', options: ['Roasted at every temperature', 'Designed to taste good in both espresso and filter', 'Only sold online'], answer: 1 },
   ];
   let triviaIndex = $state(0);
   let triviaFade = $state(true);
@@ -115,7 +234,12 @@
   let quizAnswer = $state<number | null>(null);
 
   function startTrivia() {
-    triviaIndex = Math.floor(Math.random() * COFFEE_TRIVIA.length);
+    // Shuffle trivia so quizzes are interspersed with facts
+    for (let i = COFFEE_TRIVIA.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [COFFEE_TRIVIA[i], COFFEE_TRIVIA[j]] = [COFFEE_TRIVIA[j], COFFEE_TRIVIA[i]];
+    }
+    triviaIndex = 0;
     triviaFade = true;
     quizAnswer = null;
     triviaInterval = setInterval(() => {
