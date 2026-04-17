@@ -6,12 +6,12 @@
   import GrindSizeGuide from '$lib/components/GrindSizeGuide.svelte';
   import CameraViewfinder from '$lib/components/CameraViewfinder.svelte';
   import { Camera, Upload, Info, ChevronRight, AlertCircle, Wifi, WifiOff, ChevronDown } from 'lucide-svelte';
-  import { analyzePhoto, getRecommendation, checkHealth } from '$lib/api';
-  import type { PsdResult, AnalyzeResponse, RecommendationResult as RecResult } from '$lib/api';
+  import { analyzePhoto, getRecommendation, checkHealth, preflightCheck } from '$lib/api';
+  import type { PsdResult, AnalyzeResponse, RecommendationResult as RecResult, PreflightResult } from '$lib/api';
 
   // ── State ─────────────────────────────────────────────
 
-  type AppStep = 'upload' | 'analyzing' | 'results' | 'feedback' | 'recommendation';
+  type AppStep = 'upload' | 'preflight' | 'analyzing' | 'results' | 'feedback' | 'recommendation';
 
   let step = $state<AppStep>('upload');
   let uploadedImage = $state<string | null>(null);
@@ -38,13 +38,30 @@
   let fileInput: HTMLInputElement;
   let showCamera = $state(false);
   let capturedTiltAngle = $state(0);
+  let preflightResult = $state<PreflightResult | null>(null);
 
   async function handleCameraCapture(file: File, tiltAngleDeg: number) {
     showCamera = false;
     uploadedFile = file;
     uploadedImage = URL.createObjectURL(file);
     capturedTiltAngle = tiltAngleDeg;
-    analyzeGrind();
+    step = 'preflight';
+    preflightResult = null;
+
+    try {
+      preflightResult = await preflightCheck(file);
+      // Show calibration feedback for 2s, then auto-proceed
+      setTimeout(() => {
+        if (step === 'preflight') analyzeGrind();
+      }, 2000);
+    } catch {
+      // If preflight fails, just proceed to analysis
+      analyzeGrind();
+    }
+  }
+
+  function skipPreflight() {
+    if (step === 'preflight') analyzeGrind();
   }
 
   // ── Health check on mount ─────────────────────────────
@@ -366,6 +383,46 @@
               <Camera class="w-4 h-4" /> Take Photo
             </button>
           </div>
+        {/if}
+      </div>
+    {/if}
+
+    <!-- Preflight: calibration check after camera capture -->
+    {#if step === 'preflight'}
+      <div class="p-6 bg-white border border-neutral-200 rounded-xl text-center space-y-4">
+        {#if uploadedImage}
+          <img src={uploadedImage} alt="Captured" class="w-full max-h-48 object-contain rounded-lg" />
+        {/if}
+
+        {#if preflightResult === null}
+          <div class="flex items-center justify-center gap-2 text-neutral-500">
+            <div class="w-4 h-4 border-2 border-amber-600 border-t-transparent rounded-full animate-spin"></div>
+            <span class="text-sm">Checking calibration…</span>
+          </div>
+        {:else}
+          <div class="inline-flex items-center gap-2 px-4 py-2 rounded-full text-sm font-medium
+            {preflightResult.quality === 'good' ? 'bg-green-100 text-green-800' :
+             preflightResult.quality === 'ok' ? 'bg-amber-100 text-amber-800' :
+             'bg-red-100 text-red-800'}">
+            <span class="w-2.5 h-2.5 rounded-full
+              {preflightResult.quality === 'good' ? 'bg-green-500' :
+               preflightResult.quality === 'ok' ? 'bg-amber-500' :
+               'bg-red-500'}"></span>
+            {preflightResult.message}
+          </div>
+
+          {#if preflightResult.quality === 'too_far' || preflightResult.quality === 'too_close' || preflightResult.quality === 'not_found'}
+            <div class="flex gap-3 justify-center">
+              <button onclick={() => { step = 'upload'; showCamera = true; }} class="px-4 py-2 bg-amber-600 text-white rounded-lg text-sm font-medium hover:bg-amber-700 transition-colors">
+                Retake Photo
+              </button>
+              <button onclick={skipPreflight} class="px-4 py-2 bg-neutral-200 text-neutral-700 rounded-lg text-sm font-medium hover:bg-neutral-300 transition-colors">
+                Analyze Anyway
+              </button>
+            </div>
+          {:else}
+            <p class="text-xs text-neutral-400">Proceeding to analysis…</p>
+          {/if}
         {/if}
       </div>
     {/if}

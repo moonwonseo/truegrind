@@ -181,3 +181,30 @@ export async function checkHealth(): Promise<boolean> {
     return false;
   }
 }
+
+export interface PreflightResult {
+  found: boolean;
+  px_per_mm: number | null;
+  quality: 'good' | 'ok' | 'too_far' | 'too_close' | 'not_found' | 'decode_error';
+  message: string;
+}
+
+/**
+ * Quick calibration check — runs quarter detection only (no YOLO).
+ * ~0.1s response. Used after camera capture to give distance feedback.
+ */
+export async function preflightCheck(file: File): Promise<PreflightResult> {
+  const formData = new FormData();
+  formData.append('file', file);
+
+  const resp = await fetch(`${API_BASE}/preflight`, {
+    method: 'POST',
+    body: formData,
+  });
+
+  if (!resp.ok) {
+    return { found: false, px_per_mm: null, quality: 'decode_error', message: 'Preflight check failed.' };
+  }
+
+  return resp.json();
+}

@@ -197,6 +197,67 @@ def get_brew_methods():
     return {"brew_methods": methods}
 
 
+@app.post("/api/preflight")
+async def preflight_check(file: UploadFile = File(...)):
+    """
+    Quick calibration check — runs quarter detection only (no YOLO).
+    Returns px_per_mm and distance quality so the user can adjust before full analysis.
+    ~0.1s response time.
+    """
+    contents = await file.read()
+    image = None
+
+    np_arr = np.frombuffer(contents, np.uint8)
+    image = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
+
+    if image is None:
+        try:
+            import pillow_heif
+            pillow_heif.register_heif_opener()
+            pil_img = Image.open(io.BytesIO(contents))
+            pil_img = pil_img.convert('RGB')
+            image = cv2.cvtColor(np.array(pil_img), cv2.COLOR_RGB2BGR)
+        except Exception:
+            return {"found": False, "quality": "decode_error", "message": "Could not decode image."}
+
+    if image is None:
+        return {"found": False, "quality": "decode_error", "message": "Could not decode image."}
+
+    # Resize for speed (same as analyze)
+    image, _ = resize_for_speed(image)
+
+    px_per_mm, quarter_circle = detect_quarter(image)
+
+    if px_per_mm is None:
+        return {
+            "found": False,
+            "px_per_mm": None,
+            "quality": "not_found",
+            "message": "No quarter detected. Make sure a US quarter is fully visible.",
+        }
+
+    # Rate the calibration quality
+    if px_per_mm < 18:
+        quality = "too_far"
+        message = f"Quarter too small ({px_per_mm:.0f} px/mm). Move closer."
+    elif px_per_mm > 50:
+        quality = "too_close"
+        message = f"Quarter too large ({px_per_mm:.0f} px/mm). Move farther away."
+    elif 22 <= px_per_mm <= 30:
+        quality = "good"
+        message = f"Great distance ({px_per_mm:.0f} px/mm) ✓"
+    else:
+        quality = "ok"
+        message = f"Acceptable ({px_per_mm:.0f} px/mm). Ideal range is 22–30."
+
+    return {
+        "found": True,
+        "px_per_mm": round(px_per_mm, 1),
+        "quality": quality,
+        "message": message,
+    }
+
+
 @app.post("/api/analyze")
 async def analyze_photo(
     file: UploadFile = File(...),
